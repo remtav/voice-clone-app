@@ -1,0 +1,34 @@
+services:
+  app:
+    build: .
+    image: voice-clone-app:latest
+    container_name: voice-clone-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      HF_HOME: /data/hf-cache
+    volumes:
+      # Voices, generated audio, SQLite DB and the Hugging Face model cache.
+      - ./data:/data
+    ports:
+      # Bound to localhost only: the internet reaches the app through the
+      # Cloudflare tunnel below, never through this port.
+      - "127.0.0.1:8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: voice-clone-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Set TUNNEL_TOKEN in .env (or run only the app service)}
+    depends_on:
+      - app

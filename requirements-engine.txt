@@ -1,0 +1,5 @@
+# Chatterbox (MIT) pinned to the commit that ships the multilingual v3 checkpoint
+# selector plus the Turbo/Nano variants.  The PyPI release (0.1.7, March 2026)
+# predates v3, so we install from GitHub.  It pins torch==2.6.0 / torchaudio==2.6.0,
+# which the Docker base image already provides with CUDA 12.4.
+chatterbox-tts @ git+https://github.com/resemble-ai/chatterbox.git@5de7a54aa4e5e2baadb0182dde554908b48b85c2

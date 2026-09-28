@@ -1,0 +1,13 @@
+.git
+.env
+data
+tests
+.github
+__pycache__
+*.py[cod]
+.pytest_cache
+.ruff_cache
+.venv
+venv
+README.md
+Makefile

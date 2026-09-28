@@ -1,0 +1,18 @@
+[project]
+name = "voice-clone-app"
+version = "0.1.0"
+description = "Self-hosted zero-shot voice cloning web app built on Chatterbox (MIT)."
+requires-python = ">=3.10"
+license = { text = "MIT" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["B008"]  # FastAPI's Depends()/File()/Form() defaults

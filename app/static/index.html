@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voice Clone</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%8E%99%EF%B8%8F%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">🎙️ <span>Voice Clone</span></div>
+    <div class="status" id="status-bar" title="Engine status">Connecting…</div>
+    <button id="logout-btn" class="btn btn-ghost hidden" type="button">Log out</button>
+  </header>
+
+  <section id="login-view" class="view hidden">
+    <form id="login-form" class="card login-card">
+      <h2>Sign in</h2>
+      <p class="muted">Enter the app password to continue.</p>
+      <input type="password" id="login-password" placeholder="Password" autocomplete="current-password" required>
+      <button class="btn btn-primary" type="submit">Sign in</button>
+      <p class="error hidden" id="login-error"></p>
+    </form>
+  </section>
+
+  <main id="app-view" class="view hidden">
+    <div class="layout">
+      <aside class="column">
+        <section class="card">
+          <h2>Voices</h2>
+          <ul id="voice-list" class="voice-list"></ul>
+          <p id="voice-empty" class="muted">No voices yet. Record or upload one below.</p>
+        </section>
+
+        <section class="card">
+          <h2>Add a voice</h2>
+          <div class="tabs" role="tablist">
+            <button class="tab active" type="button" data-tab="record">Record</button>
+            <button class="tab" type="button" data-tab="upload">Upload</button>
+          </div>
+
+          <div id="tab-record" class="tab-panel">
+            <p class="muted small">Read a few sentences naturally, in the language you want to clone.
+              5–15 seconds of clean speech without background noise works best.</p>
+            <div class="record-controls">
+              <button id="record-btn" class="btn btn-danger" type="button">● Record</button>
+              <span id="record-timer" class="timer">0:00</span>
+            </div>
+            <audio id="record-preview" controls class="hidden"></audio>
+          </div>
+
+          <div id="tab-upload" class="tab-panel hidden">
+            <p class="muted small">WAV, MP3, M4A, OGG, FLAC or WebM. Only the first
+              <span id="max-ref-seconds">30</span> seconds are kept.</p>
+            <input type="file" id="voice-file" accept="audio/*,video/*,.wav,.mp3,.m4a,.aac,.ogg,.opus,.flac,.webm,.mp4">
+          </div>
+
+          <form id="voice-form" class="stack">
+            <input type="text" id="voice-name" placeholder="Voice name (e.g. Me, narrator)" maxlength="120">
+            <label class="field">Language of the recording
+              <select id="voice-language"></select>
+            </label>
+            <button class="btn btn-primary" id="voice-save" type="submit" disabled>Save voice</button>
+          </form>
+        </section>
+      </aside>
+
+      <section class="column main-column">
+        <section class="card">
+          <h2>Generate speech</h2>
+          <form id="generate-form" class="stack">
+            <div class="row">
+              <label class="field">Voice
+                <select id="gen-voice" required></select>
+              </label>
+              <label class="field">Language
+                <select id="gen-language"></select>
+              </label>
+            </div>
+            <textarea id="gen-text" rows="7" placeholder="Type or paste the text to speak…" required></textarea>
+            <div class="char-count"><span id="char-count">0</span> / <span id="char-max">5000</span> characters</div>
+
+            <details class="advanced">
+              <summary>Advanced settings</summary>
+              <div class="sliders">
+                <label class="field">Exaggeration <output id="exaggeration-val">0.50</output>
+                  <input type="range" id="exaggeration" min="0" max="1.5" step="0.05" value="0.5">
+                </label>
+                <label class="field">CFG weight / pace <output id="cfg-val">0.50</output>
+                  <input type="range" id="cfg" min="0" max="1" step="0.05" value="0.5">
+                </label>
+                <label class="field">Temperature <output id="temp-val">0.80</output>
+                  <input type="range" id="temp" min="0.1" max="1.5" step="0.05" value="0.8">
+                </label>
+                <label class="field">Seed (optional)
+                  <input type="number" id="seed" min="0" step="1" placeholder="random">
+                </label>
+              </div>
+              <p class="muted small">
+                Defaults (0.5 / 0.5) suit most voices. For more expressive speech try exaggeration ≈ 0.7 with
+                CFG ≈ 0.3. If the speaker is fast, lower CFG to ≈ 0.3. A fixed seed makes results reproducible.
+              </p>
+            </details>
+
+            <button class="btn btn-primary btn-lg" id="gen-btn" type="submit">Generate</button>
+          </form>
+        </section>
+
+        <section class="card">
+          <div class="card-head">
+            <h2>Generations</h2>
+            <button id="refresh-jobs" class="btn btn-ghost small" type="button">Refresh</button>
+          </div>
+          <ul id="job-list" class="job-list"></ul>
+          <p id="job-empty" class="muted">Nothing generated yet.</p>
+        </section>
+      </section>
+    </div>
+  </main>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
