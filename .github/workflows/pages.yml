@@ -10,7 +10,9 @@ name: Deploy demo to GitHub Pages
 
 on:
   push:
-    branches: ["claude/cool-bell-fsdhzk", "main"]
+    # Only the default branch: the github-pages environment blocks deploys
+    # from any other branch, so triggering elsewhere just produces failures.
+    branches: ["main"]
     paths:
       - "docs/**"
       - ".github/workflows/pages.yml"
