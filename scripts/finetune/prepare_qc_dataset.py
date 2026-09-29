@@ -14,7 +14,9 @@ Sources:
   repo ``tontate/f5-tts-quebec-french-finetune`` at a pinned revision.
 * ``from-processed`` converts that corpus (option A of the plan).
 * ``from-common-voice`` filters a full Common Voice fr release (option B): accent
-  tag, votes, a per-speaker cap, deduplication, then ffmpeg conversion.
+  tag, votes, a per-speaker cap, deduplication, then ffmpeg conversion.  With
+  ``--accent europe`` it builds the France/Belgium/Switzerland set that the
+  phase 3 accent probe needs as negatives.
 
 Examples::
 
@@ -55,6 +57,7 @@ FIELDS = ["file_name", "transcription", "duration_seconds", "client_id"]
 
 # Common Voice free-text `accents` values for Quebec / Canadian French.
 ACCENT_RE = re.compile(r"quebecois|quebec|canadien|canadian|canada|\bqc\b|montreal")
+EUROPE_RE = re.compile(r"\bfrance\b|belgique|belgian|belgium|suisse|swiss|switzerland")
 
 # Typography only.  Quebec spellings and elisions ("pis", "tsé", "icitte") are
 # kept verbatim: they are what the model must learn to pronounce.
@@ -86,6 +89,14 @@ def fold(text: str) -> str:
 
 def matches_qc_accent(accents: str) -> bool:
     return bool(accents) and bool(ACCENT_RE.search(fold(accents)))
+
+
+def matches_europe_accent(accents: str) -> bool:
+    """France/Belgium/Switzerland, and never a speaker who also tags Quebec."""
+    return bool(accents) and bool(EUROPE_RE.search(fold(accents))) and not matches_qc_accent(accents)
+
+
+ACCENT_MATCHERS = {"qc": matches_qc_accent, "europe": matches_europe_accent}
 
 
 def normalize_text(text: str) -> str:
@@ -181,15 +192,17 @@ def select_cv_rows(
     min_up_votes: int = 2,
     max_down_votes: int = 0,
     max_per_speaker: int = 300,
+    accent: str = "qc",
 ) -> tuple[list[dict[str, str]], Counter]:
-    """Filter Common Voice rows: QC accent tag, votes, dedupe, per-speaker cap."""
+    """Filter Common Voice rows: accent tag, votes, dedupe, per-speaker cap."""
+    matches = ACCENT_MATCHERS[accent]
     stats: Counter = Counter()
     per_speaker: Counter = Counter()
     seen: set[str] = set()
     selected = []
     for row in rows:
-        if not matches_qc_accent(row.get("accents", "")):
-            stats["not_qc"] += 1
+        if not matches(row.get("accents", "")):
+            stats[f"not_{accent}"] += 1
             continue
         if int(row.get("up_votes") or 0) < min_up_votes or int(row.get("down_votes") or 0) > max_down_votes:
             stats["votes"] += 1
@@ -353,6 +366,8 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--min-up-votes", type=int, default=2)
             p.add_argument("--max-down-votes", type=int, default=0)
             p.add_argument("--max-per-speaker", type=int, default=300)
+            p.add_argument("--accent", choices=sorted(ACCENT_MATCHERS), default="qc",
+                           help="europe: France/Belgium/Switzerland clips (accent probe negatives)")
             p.add_argument("--work-dir", type=Path, help="where converted wavs go (default: a temp dir)")
         p.add_argument("--out", type=Path, required=True, help="audio_data directory to create")
         p.add_argument("--holdout", type=int, default=HOLDOUT_CLIPS)
@@ -374,7 +389,7 @@ def main(argv: list[str] | None = None) -> int:
             clips, stats = read_common_voice(
                 args.cv_dir, work, args.min_seconds, args.max_seconds,
                 min_up_votes=args.min_up_votes, max_down_votes=args.max_down_votes,
-                max_per_speaker=args.max_per_speaker,
+                max_per_speaker=args.max_per_speaker, accent=args.accent,
             )
             # Converted files may live in a temp dir: always copy them out.
             summary = write_dataset(clips, args.out, args.holdout, "copy" if args.work_dir is None else args.link)

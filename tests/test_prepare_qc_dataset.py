@@ -146,6 +146,21 @@ def cv_row(path: str, sentence: str, accents: str = "Québécois", speaker: str 
             "up_votes": str(up), "down_votes": str(down)}
 
 
+@pytest.mark.parametrize("value, expected", [
+    ("Français de France", True), ("Belgique", True), ("Swiss French", True),
+    ("Québécois, France", False), ("Canadien", False), ("Français", False), ("", False),
+])
+def test_europe_accent_tags(value, expected):
+    assert prep.matches_europe_accent(value) is expected
+
+
+def test_select_cv_rows_europe_set():
+    rows = [cv_row("a.mp3", "Une phrase de France.", accents="Français de France"),
+            cv_row("b.mp3", "Une phrase du Québec.", accents="Québécois")]
+    selected, stats = prep.select_cv_rows(rows, accent="europe")
+    assert [r["path"] for r in selected] == ["a.mp3"] and stats == {"not_europe": 1}
+
+
 def test_select_cv_rows_applies_every_filter():
     rows = [
         cv_row("a.mp3", "Première phrase du locuteur."),

@@ -392,6 +392,28 @@ python -m scripts.finetune.validate_t3_checkpoint data/finetune/runs/fr_ca_r16/m
 
 ## 5. Phase 3 — Évaluation base v3 vs `fr-ca`
 
+> **Implémenté** — `scripts/finetune/eval/` (dépendances : section « Phase 3 » de `requirements-finetune.txt`) :
+>
+> ```bash
+> E=data/finetune/eval/fr_ca_r16
+> # négatifs de la sonde : clips européens (Common Voice complet requis)
+> python -m scripts.finetune.prepare_qc_dataset from-common-voice --accent europe \
+>     --cv-dir <cv-corpus-fr> --out data/finetune/eu/audio_data
+> python -m scripts.finetune.eval.accent_probe train --out data/finetune/eval/accent_probe.npz \
+>     --positive data/finetune/qc/audio_data --negative data/finetune/eu/audio_data   # exige ≥ 0,8 d'exactitude
+> python -m scripts.finetune.eval.battery --out $E --checkpoint base=v3 \
+>     --checkpoint fr_ca=data/finetune/runs/fr_ca_r16/merged_model/t3_fr_ca.safetensors \
+>     --voice me=<ta référence>.wav --voice qc1=<holdout> --voice qc2=<holdout>   # 600 clips, reprise possible
+> python -m scripts.finetune.eval.score --battery $E --probe data/finetune/eval/accent_probe.npz
+> python -m scripts.finetune.eval.abx make --battery $E --candidate fr_ca --voice me   # puis remplir abx/pairs.csv
+> python -m scripts.finetune.eval.report --battery $E    # report.md + checkpoint recommandé (exit 1 si aucun)
+> ```
+>
+> Plusieurs époques : ajouter un `--checkpoint fr_ca_e1=...` par export de `merge_adapter`, le rapport
+> les compare tous à la base, CFG par CFG. Relancer `score` ne calcule que les colonnes manquantes.
+> La batterie (`sentences_qc.tsv`) écrit les nombres en toutes lettres ; la normalisation WER
+> (`eval/text.py`) épelle les chiffres de l'ASR et ramène le lexique QC à sa forme standard des deux côtés.
+
 ### 5.1 Matériel de test — `scripts/finetune/eval/`
 
 - `sentences_qc.txt` : **50 phrases** ciblant les traits québécois. Exemples à compléter :

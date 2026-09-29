@@ -16,3 +16,7 @@ tqdm
 soundfile
 safetensors
 huggingface_hub
+# Phase 3 evaluation (scripts/finetune/eval)
+faster-whisper
+speechbrain
+num2words
