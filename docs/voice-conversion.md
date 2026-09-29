@@ -1,5 +1,11 @@
 # Voice conversion — design sketch
 
+> **Status: deprioritised.** Voice conversion needs a *spoken* source, so it cannot
+> serve the main use case (text → my own voice with my own accent). The retained
+> solution is a `fr-CA` LoRA fine-tune of the T3 model — see
+> [`finetune-fr-ca-plan.md`](finetune-fr-ca-plan.md). This sketch stays useful only
+> when the target voice differs from the speaker (narrate yourself, output in another voice).
+
 ## Goal
 
 Keep a speaker's **original accent** (e.g. Quebec French) in the output.
