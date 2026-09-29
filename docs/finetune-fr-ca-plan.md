@@ -503,6 +503,13 @@ Optionnelle mais c'est le meilleur résultat possible : le modèle apprend **ta*
 
 ## 7. Phase 5 — Déploiement
 
+> **Implémenté** : procédure de déploiement / retour arrière dans le README (section *Regional
+> accents*) ; les voix `fr` démarrent sur le preset *Faithful accent* tant que l'utilisateur n'a
+> touché à aucun réglage (vérifié dans Chromium) ;
+> `python -m scripts.finetune.model_card --checkpoint … --report … --out README.md` génère la fiche
+> Hugging Face (métadonnées, SHA-256, rapport d'évaluation) et **refuse** tout checkpoint de seconde
+> étape ou entraîné sur des clips `audio/own_*` (ta voix).
+
 1. Copier le checkpoint retenu dans le volume : `data/models/t3_fr_ca.safetensors`
    (`docker-compose` monte `./data` sur `/data`, `DATA_DIR=/data`).
 2. `.env` : `CHATTERBOX_T3_MODEL=models/t3_fr_ca.safetensors`.

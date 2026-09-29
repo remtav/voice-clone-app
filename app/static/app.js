@@ -10,6 +10,7 @@
     jobs: new Map(), // id -> job
     jobNodes: new Map(), // id -> <li>
     selectedVoice: null,
+    settingsTouched: false,
     recordedBlob: null,
     mediaRecorder: null,
     recordTimer: null,
@@ -102,6 +103,7 @@
     updateCharCount();
 
     await Promise.all([loadVoices(), loadJobs()]);
+    defaultPresetFor(state.voices.find((v) => v.id === state.selectedVoice));
     refreshStatus();
     clearInterval(state.statusTimer);
     state.statusTimer = setInterval(refreshStatus, 5000);
@@ -246,6 +248,7 @@
     state.selectedVoice = id;
     const voice = state.voices.find((v) => v.id === id);
     if (voice?.language && state.config.engine.multilingual) $("#gen-language").value = voice.language;
+    defaultPresetFor(voice);
     renderVoices();
   }
 
@@ -511,6 +514,7 @@
     if (job.language && state.config.engine.multilingual) $("#gen-language").value = job.language;
     if (state.voices.some((v) => v.id === job.voice_id)) selectVoice(job.voice_id);
     const p = job.params || {};
+    state.settingsTouched = true;
     setSliders(p);
     $("#seed").value = p.seed ?? "";
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -602,6 +606,15 @@
     setSliders(Object.fromEntries(SLIDERS.map(([, , key, attr]) => [key, btn.dataset[attr]])));
   }
 
+  // French voices default to "Faithful accent" (keeps a regional accent such as
+  // Quebec French) until the user picks settings themselves.
+  function defaultPresetFor(voice) {
+    if (state.settingsTouched) return;
+    const name = voice?.language === "fr" ? "faithful" : "neutral";
+    const btn = document.querySelector(`.preset[data-preset="${name}"]`);
+    if (btn) applyPreset(btn);
+  }
+
   function markPreset() {
     document.querySelectorAll(".preset").forEach((btn) => {
       const match = SLIDERS.every(([slider, , , attr]) => Math.abs(Number($(slider).value) - Number(btn.dataset[attr])) < 1e-6);
@@ -624,10 +637,14 @@
     for (const [slider, output] of SLIDERS) {
       $(slider).addEventListener("input", (e) => {
         $(output).textContent = Number(e.target.value).toFixed(2);
+        state.settingsTouched = true;
         markPreset();
       });
     }
-    document.querySelectorAll(".preset").forEach((btn) => btn.addEventListener("click", () => applyPreset(btn)));
+    document.querySelectorAll(".preset").forEach((btn) => btn.addEventListener("click", () => {
+      state.settingsTouched = true;
+      applyPreset(btn);
+    }));
     markPreset();
 
     document.querySelectorAll(".tab").forEach((tab) => {

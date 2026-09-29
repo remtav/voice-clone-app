@@ -47,5 +47,12 @@ class LazyState(Mapping[str, np.ndarray]):
     def __len__(self) -> int:
         return len(self._keys)
 
+    def shape(self, key: str) -> tuple[int, ...]:
+        """Shape without loading the tensor."""
+        return tuple(self._file.get_slice(key).get_shape())
+
+    def dtype(self, key: str) -> str:
+        return str(self._file.get_slice(key).get_dtype())
+
     def metadata(self) -> dict[str, str]:
         return self._file.metadata() or {}
