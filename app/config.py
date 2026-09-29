@@ -42,6 +42,9 @@ class Settings:
     # Engine selection
     engine: str = "chatterbox"  # "chatterbox" or "fake" (for tests / CPU dev)
     chatterbox_model: str = "multilingual"  # "multilingual", "english" or "turbo"
+    # Multilingual T3 checkpoint: "v2", "v3", or a fine-tuned ``.safetensors`` file
+    # (absolute, or relative to ``data_dir``), e.g. "models/t3_fr_ca.safetensors".
+    chatterbox_t3_model: str = "v3"
     device: str = "auto"  # "auto", "cuda" or "cpu"
     preload_model: bool = True
 
@@ -62,6 +65,8 @@ class Settings:
         self.data_dir = Path(self.data_dir)
         self.engine = self.engine.lower().strip()
         self.chatterbox_model = self.chatterbox_model.lower().strip()
+        # Not lowercased: it may be a file path.
+        self.chatterbox_t3_model = self.chatterbox_t3_model.strip() or "v3"
         if not self.secret_key:
             # Derive a stable secret so sessions survive restarts even when no
             # explicit SECRET_KEY is configured.  Anyone who knows the password
@@ -75,6 +80,7 @@ class Settings:
             data_dir=Path(os.environ.get("DATA_DIR", "data")),
             engine=os.environ.get("TTS_ENGINE", "chatterbox"),
             chatterbox_model=os.environ.get("CHATTERBOX_MODEL", "multilingual"),
+            chatterbox_t3_model=os.environ.get("CHATTERBOX_T3_MODEL", "v3"),
             device=os.environ.get("DEVICE", "auto"),
             preload_model=_bool("PRELOAD_MODEL", True),
             app_password=os.environ.get("APP_PASSWORD", ""),
@@ -100,6 +106,15 @@ class Settings:
     @property
     def uploads_dir(self) -> Path:
         return self.data_dir / "uploads"
+
+    @property
+    def chatterbox_t3_path(self) -> Path | None:
+        """Resolved path of a fine-tuned T3 checkpoint, or None for an official one (v2/v3)."""
+        value = self.chatterbox_t3_model
+        if not value.endswith(".safetensors"):
+            return None
+        path = Path(value)
+        return path if path.is_absolute() else self.data_dir / path
 
     @property
     def db_path(self) -> Path:

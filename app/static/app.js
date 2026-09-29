@@ -511,9 +511,7 @@
     if (job.language && state.config.engine.multilingual) $("#gen-language").value = job.language;
     if (state.voices.some((v) => v.id === job.voice_id)) selectVoice(job.voice_id);
     const p = job.params || {};
-    if (p.exaggeration != null) { $("#exaggeration").value = p.exaggeration; $("#exaggeration-val").textContent = Number(p.exaggeration).toFixed(2); }
-    if (p.cfg_weight != null) { $("#cfg").value = p.cfg_weight; $("#cfg-val").textContent = Number(p.cfg_weight).toFixed(2); }
-    if (p.temperature != null) { $("#temp").value = p.temperature; $("#temp-val").textContent = Number(p.temperature).toFixed(2); }
+    setSliders(p);
     $("#seed").value = p.seed ?? "";
     window.scrollTo({ top: 0, behavior: "smooth" });
     $("#gen-text").focus();
@@ -582,6 +580,35 @@
     showLogin();
   }
 
+
+  // ---------------------------------------------------------------- presets
+  // [slider, output, job param, preset data attribute]
+  const SLIDERS = [
+    ["#exaggeration", "#exaggeration-val", "exaggeration", "exag"],
+    ["#cfg", "#cfg-val", "cfg_weight", "cfg"],
+    ["#temp", "#temp-val", "temperature", "temp"],
+  ];
+
+  function setSliders(values) {
+    for (const [slider, output, key] of SLIDERS) {
+      if (values[key] == null) continue;
+      $(slider).value = values[key];
+      $(output).textContent = Number(values[key]).toFixed(2);
+    }
+    markPreset();
+  }
+
+  function applyPreset(btn) {
+    setSliders(Object.fromEntries(SLIDERS.map(([, , key, attr]) => [key, btn.dataset[attr]])));
+  }
+
+  function markPreset() {
+    document.querySelectorAll(".preset").forEach((btn) => {
+      const match = SLIDERS.every(([slider, , , attr]) => Math.abs(Number($(slider).value) - Number(btn.dataset[attr])) < 1e-6);
+      btn.classList.toggle("active", match);
+    });
+  }
+
   // ---------------------------------------------------------------- wiring
   document.addEventListener("DOMContentLoaded", () => {
     $("#login-form").addEventListener("submit", login);
@@ -594,9 +621,14 @@
     $("#gen-voice").addEventListener("change", (e) => selectVoice(e.target.value));
     $("#refresh-jobs").addEventListener("click", () => loadJobs().catch((err) => toast(err.message)));
 
-    for (const [slider, output] of [["#exaggeration", "#exaggeration-val"], ["#cfg", "#cfg-val"], ["#temp", "#temp-val"]]) {
-      $(slider).addEventListener("input", (e) => ($(output).textContent = Number(e.target.value).toFixed(2)));
+    for (const [slider, output] of SLIDERS) {
+      $(slider).addEventListener("input", (e) => {
+        $(output).textContent = Number(e.target.value).toFixed(2);
+        markPreset();
+      });
     }
+    document.querySelectorAll(".preset").forEach((btn) => btn.addEventListener("click", () => applyPreset(btn)));
+    markPreset();
 
     document.querySelectorAll(".tab").forEach((tab) => {
       tab.addEventListener("click", () => {

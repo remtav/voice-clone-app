@@ -141,6 +141,7 @@ All settings are environment variables (see `.env.example`).
 | `TUNNEL_TOKEN` | | Cloudflare tunnel token (compose only). |
 | `TTS_ENGINE` | `chatterbox` | `chatterbox` or `fake`. |
 | `CHATTERBOX_MODEL` | `multilingual` | `multilingual`, `english` or `turbo`. |
+| `CHATTERBOX_T3_MODEL` | `v3` | Multilingual T3 checkpoint: `v2`, `v3`, or a fine-tuned `.safetensors` file (absolute, or relative to `DATA_DIR`). See [Regional accents](#regional-accents). |
 | `DEVICE` | `auto` | `auto`, `cuda` or `cpu` (CPU works but is very slow). |
 | `PRELOAD_MODEL` | `1` | Load the model at startup rather than on first use. |
 | `MAX_TEXT_CHARS` | `5000` | Max characters per generation. |
@@ -150,6 +151,22 @@ All settings are environment variables (see `.env.example`).
 | `MIN_REFERENCE_SECONDS` | `1` | Shorter clips are rejected. |
 | `HISTORY_LIMIT` | `200` | Finished jobs kept; older ones and their audio are pruned. |
 | `DATA_DIR` | `data` | Storage root (`/data` in Docker). |
+
+### Regional accents
+
+The multilingual model takes its accent from the language token, so a French
+voice comes out with a France-French accent even when the reference speaks
+Quebec French. Two levers, in order of cost:
+
+1. **Settings.** Pick the *Faithful accent* preset (higher CFG weight follows
+   the reference more closely) and make sure the **first 6 seconds** of the
+   reference carry the accent: only they condition pronunciation.
+2. **A fine-tuned T3 checkpoint.** Train a regional finetune (the way Resemble
+   ships `pt-br` or `es-mx-latam`), copy it into the data volume and point
+   `CHATTERBOX_T3_MODEL` at it, e.g. `models/t3_fr_ca.safetensors`. The status
+   bar then shows `custom T3 t3_fr_ca.safetensors`; remove the variable to go
+   back to the official v3. The full recipe for Quebec French is in
+   [`docs/finetune-fr-ca-plan.md`](docs/finetune-fr-ca-plan.md).
 
 ## HTTP API
 
