@@ -246,6 +246,37 @@ les clips retenus. Même sortie qu'en B.
 
 ## 4. Phase 2 — Entraînement LoRA et fusion
 
+> **Implémenté** — commandes réelles (environnement : `requirements-finetune.txt`) :
+>
+> ```bash
+> python -m scripts.finetune.setup_toolkit --run-dir data/finetune/runs/fr_ca_r16 \
+>     --data-dir data/finetune/qc/audio_data            # télécharge, vérifie SHA-256, patche
+> python data/finetune/runs/fr_ca_r16/toolkit/lora.py   # entraînement (GPU)
+> python data/finetune/runs/fr_ca_r16/toolkit/fix_merged_model.py
+> python -m scripts.finetune.validate_t3_checkpoint \
+>     data/finetune/runs/fr_ca_r16/merged_model/t3_fr_ca.safetensors --strict-load \
+>     --smoke-reference data/finetune/qc/audio_data/audio/<clip du holdout>.wav
+> python -m scripts.finetune.merge_adapter --adapter data/finetune/runs/fr_ca_r16/checkpoint_epoch1_stepN.pt \
+>     --out data/finetune/runs/fr_ca_r16/t3_fr_ca_e1.safetensors   # export d'une époque intermédiaire
+> ```
+>
+> **Deux écarts découverts en exécutant réellement le toolkit** (mini-entraînement CPU) :
+>
+> 1. **Cibles de parole sans BOS/EOS.** Le toolkit entraîne sur les tokens S3 bruts, sans
+>    `start_speech_token` (6561) ni `stop_speech_token` (6562), alors que l'inférence démarre
+>    sur l'un et s'arrête sur l'autre. `setup_toolkit` encadre désormais les cibles comme à
+>    l'inférence (correct par construction, **non prouvé expérimentalement** ;
+>    `--upstream-speech-targets` rétablit le cadrage amont pour comparer sur GPU).
+>    Un mini-entraînement CPU volontairement agressif (LR 1e-3) produisait 40 s d'audio pour
+>    une phrase de 7 mots, avec **et** sans ce correctif : c'est le LR qui casse le modèle.
+>    D'où le contrôle ajouté à `validate_t3_checkpoint --smoke-reference`, qui échoue si le
+>    débit tombe sous 3 caractères/s.
+> 2. **`WARMUP_STEPS` n'est jamais utilisé** (le planificateur est un cosinus simple) : le
+>    réglage `WARMUP_STEPS = 200` ci-dessous est sans effet et n'est pas exposé.
+>
+> Les patches effectivement appliqués sont documentés en tête de `scripts/finetune/setup_toolkit.py`.
+> La spécification d'origine suit.
+
 ### 4.1 Environnement (séparé de l'app)
 
 ```bash
@@ -448,6 +479,7 @@ Optionnelle mais c'est le meilleur résultat possible : le modèle apprend **ta*
 | Le toolkit part de **v2** (défaut) → checkpoint incompatible/inférieur | patches #1 et #2 (§4.2) ; validation 4.6 compare aux clés/shapes de **v3** |
 | Fork du toolkit installé comme paquet (`chatterbox-tts` 0.1.4, pré-v3) | n'installer que Chatterbox au commit de l'app ; copier uniquement `lora.py` + `fix_merged_model.py` |
 | `load_state_dict` strict échoue | validation 4.6 avant tout déploiement ; jamais de clé `lora_*` |
+| Le modèle ne s'arrête plus de parler (LR trop fort, ou fin de parole mal apprise) | contrôle de débit du fumage (§4.6) ; LR 2e-5 ; cadrage BOS/EOS (comparable via `--upstream-speech-targets`) |
 | Parole lue Common Voice = prosodie plate → sortie moins expressive | peu d'époques, rank 16, LoRA sur l'attention/MLP seulement ; phase 4 ré-injecte de la parole naturelle |
 | Un locuteur domine le corpus | option B : plafond par `client_id` ; sinon écoute d'échantillons |
 | WER gonflé par la normalisation ASR du lexique QC | table de mapping des deux côtés (§5.2) ; juger surtout ΔWER, pas la valeur absolue |
