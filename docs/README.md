@@ -20,9 +20,11 @@ The real application needs an NVIDIA GPU and a Python server (see the project
 ## Deploying
 
 The workflow at `.github/workflows/pages.yml` publishes this folder on every
-push that touches it. Enable it once under **Settings → Pages → Build and
-deployment → Source: GitHub Actions**. The site then appears at
-`https://<owner>.github.io/voice-clone-app/`.
+push that touches it, and turns Pages on automatically (`enablement: true`) the
+first time it runs. The site then appears at
+`https://<owner>.github.io/voice-clone-app/`. If your account restricts
+auto-enablement, turn it on once under **Settings → Pages → Build and
+deployment → Source: GitHub Actions** and re-run the workflow.
 
 To preview locally:
 
