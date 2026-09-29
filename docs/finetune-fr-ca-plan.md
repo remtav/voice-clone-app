@@ -183,11 +183,17 @@ audio_data/
 
 ### 3.1 Option A (recommandée) — corpus QC déjà préparé (CC0)
 
+> **Implémenté** : `scripts/finetune/prepare_qc_dataset.py` (sous-commandes `download`,
+> `from-processed`, `from-common-voice`). Commandes réelles :
+
 ```bash
-pip install -U "huggingface_hub[cli]" soundfile
-huggingface-cli download tontate/f5-tts-quebec-french-finetune \
-  --include "dataset/processed/*" --local-dir data/finetune/qc_src
+pip install -U huggingface_hub soundfile
+python -m scripts.finetune.prepare_qc_dataset download --dest data/finetune/qc_src   # révision HF épinglée
+python -m scripts.finetune.prepare_qc_dataset from-processed \
+  --src data/finetune/qc_src/dataset/processed --out data/finetune/qc/audio_data
 ```
+
+La spécification d'origine suit.
 
 Format source : `dataset/processed/metadata.csv`, séparateur `|`, en-tête `audio_file|text`,
 chemins absolus `/workspace/data/processed/wavs/qc/common_voice_fr_<id>.wav` → ne garder que
@@ -214,11 +220,9 @@ Si l'on veut `client_id`, `up_votes/down_votes`, ou une version CV plus récente
 Télécharger « Common Voice Scripted Speech » fr (Mozilla Data Collective, compte + accord
 CC0 ; ~1 210 h, plusieurs dizaines de Go), puis :
 
-```bash
-huggingface-cli download tontate/f5-tts-quebec-french-finetune --include "scripts/*" --local-dir data/finetune/tools
-python data/finetune/tools/scripts/prep_common_voice_qc.py --cv-dir <cv-corpus-fr> \
-  --out-wav-dir data/finetune/qc_src/wavs --out-csv data/finetune/qc_src/metadata.csv
-```
+> **Implémenté** sans dépendre du script externe (ffmpeg au lieu de librosa) :
+> `python -m scripts.finetune.prepare_qc_dataset from-common-voice --cv-dir <cv-corpus-fr> --out data/finetune/qc/audio_data`
+> (filtres `--min-up-votes 2 --max-down-votes 0 --max-per-speaker 300` par défaut ; holdout par locuteur).
 
 Le script filtre le champ `accents` (regex `qu[ée]b[ée]cois|canadien|canada|\bqc\b|montr[ée]al`,
 insensible aux accents/casse), rééchantillonne à 24 kHz, coupe les silences, borne 1–15 s,
