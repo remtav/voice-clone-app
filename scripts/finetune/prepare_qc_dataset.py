@@ -14,7 +14,9 @@ Sources:
   repo ``tontate/f5-tts-quebec-french-finetune`` at a pinned revision.
 * ``from-processed`` converts that corpus (option A of the plan).
 * ``from-common-voice`` filters a full Common Voice fr release (option B): accent
-  tag, votes, a per-speaker cap, deduplication, then ffmpeg conversion.
+  tag, votes, a per-speaker cap, deduplication, then ffmpeg conversion.  With
+  ``--accent europe`` it builds the France/Belgium/Switzerland set that the
+  phase 3 accent probe needs as negatives.
 
 Examples::
 
@@ -55,6 +57,7 @@ FIELDS = ["file_name", "transcription", "duration_seconds", "client_id"]
 
 # Common Voice free-text `accents` values for Quebec / Canadian French.
 ACCENT_RE = re.compile(r"quebecois|quebec|canadien|canadian|canada|\bqc\b|montreal")
+EUROPE_RE = re.compile(r"\bfrance\b|belgique|belgian|belgium|suisse|swiss|switzerland")
 
 # Typography only.  Quebec spellings and elisions ("pis", "tsé", "icitte") are
 # kept verbatim: they are what the model must learn to pronounce.
@@ -88,6 +91,14 @@ def matches_qc_accent(accents: str) -> bool:
     return bool(accents) and bool(ACCENT_RE.search(fold(accents)))
 
 
+def matches_europe_accent(accents: str) -> bool:
+    """France/Belgium/Switzerland, and never a speaker who also tags Quebec."""
+    return bool(accents) and bool(EUROPE_RE.search(fold(accents))) and not matches_qc_accent(accents)
+
+
+ACCENT_MATCHERS = {"qc": matches_qc_accent, "europe": matches_europe_accent}
+
+
 def normalize_text(text: str) -> str:
     text = text.translate(_TYPOGRAPHY)
     text = re.sub(r"\s+([,.])", r"\1", text)  # French keeps the space before ; : ! ?
@@ -102,17 +113,24 @@ def _stable_rank(value: str) -> str:
     return hashlib.sha1(value.encode("utf-8")).hexdigest()
 
 
-def split_holdout(clips: list[Clip], n: int = HOLDOUT_CLIPS) -> tuple[list[Clip], list[Clip]]:
+def split_holdout(
+    clips: list[Clip], n: int = HOLDOUT_CLIPS, by_speaker: bool = True
+) -> tuple[list[Clip], list[Clip]]:
     """Deterministically hold out ~n clips.
 
-    When speakers are known, whole speakers are held out so evaluation voices
-    are never seen in training; otherwise individual clips are.
+    With ``by_speaker`` and known speakers, whole speakers are held out so
+    evaluation voices are never seen in training; otherwise individual clips are
+    (e.g. a single speaker's own recordings).
     """
     if n <= 0 or not clips:
         return list(clips), []
+
+    def group(clip: Clip) -> str:
+        return clip.client_id if by_speaker and clip.client_id else f"clip:{clip.name}"
+
     groups: dict[str, list[Clip]] = {}
     for clip in clips:
-        groups.setdefault(clip.client_id or f"clip:{clip.name}", []).append(clip)
+        groups.setdefault(group(clip), []).append(clip)
     held: set[str] = set()
     count = 0
     for key in sorted(groups, key=_stable_rank):
@@ -122,8 +140,8 @@ def split_holdout(clips: list[Clip], n: int = HOLDOUT_CLIPS) -> tuple[list[Clip]
             break  # always keep at least one group for training
         held.add(key)
         count += len(groups[key])
-    train = [c for c in clips if (c.client_id or f"clip:{c.name}") not in held]
-    holdout = [c for c in clips if (c.client_id or f"clip:{c.name}") in held]
+    train = [c for c in clips if group(c) not in held]
+    holdout = [c for c in clips if group(c) in held]
     return train, holdout
 
 
@@ -181,15 +199,17 @@ def select_cv_rows(
     min_up_votes: int = 2,
     max_down_votes: int = 0,
     max_per_speaker: int = 300,
+    accent: str = "qc",
 ) -> tuple[list[dict[str, str]], Counter]:
-    """Filter Common Voice rows: QC accent tag, votes, dedupe, per-speaker cap."""
+    """Filter Common Voice rows: accent tag, votes, dedupe, per-speaker cap."""
+    matches = ACCENT_MATCHERS[accent]
     stats: Counter = Counter()
     per_speaker: Counter = Counter()
     seen: set[str] = set()
     selected = []
     for row in rows:
-        if not matches_qc_accent(row.get("accents", "")):
-            stats["not_qc"] += 1
+        if not matches(row.get("accents", "")):
+            stats[f"not_{accent}"] += 1
             continue
         if int(row.get("up_votes") or 0) < min_up_votes or int(row.get("down_votes") or 0) > max_down_votes:
             stats["votes"] += 1
@@ -284,12 +304,14 @@ def _write_csv(path: Path, clips: list[Clip]) -> None:
             writer.writerow([f"audio/{clip.name}", clip.text, f"{clip.duration:.3f}", clip.client_id])
 
 
-def write_dataset(clips: list[Clip], out: Path, holdout_clips: int = HOLDOUT_CLIPS, link: str = "hardlink") -> dict:
+def write_dataset(
+    clips: list[Clip], out: Path, holdout_clips: int = HOLDOUT_CLIPS, link: str = "hardlink", by_speaker: bool = True
+) -> dict:
     names = Counter(c.name for c in clips)
     clashes = [n for n, k in names.items() if k > 1]
     if clashes:
         raise ValueError(f"Duplicate audio file names: {clashes[:5]}")
-    train, holdout = split_holdout(clips, holdout_clips)
+    train, holdout = split_holdout(clips, holdout_clips, by_speaker)
     audio = out / "audio"
     audio.mkdir(parents=True, exist_ok=True)
     for clip in clips:
@@ -353,6 +375,8 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--min-up-votes", type=int, default=2)
             p.add_argument("--max-down-votes", type=int, default=0)
             p.add_argument("--max-per-speaker", type=int, default=300)
+            p.add_argument("--accent", choices=sorted(ACCENT_MATCHERS), default="qc",
+                           help="europe: France/Belgium/Switzerland clips (accent probe negatives)")
             p.add_argument("--work-dir", type=Path, help="where converted wavs go (default: a temp dir)")
         p.add_argument("--out", type=Path, required=True, help="audio_data directory to create")
         p.add_argument("--holdout", type=int, default=HOLDOUT_CLIPS)
@@ -374,7 +398,7 @@ def main(argv: list[str] | None = None) -> int:
             clips, stats = read_common_voice(
                 args.cv_dir, work, args.min_seconds, args.max_seconds,
                 min_up_votes=args.min_up_votes, max_down_votes=args.max_down_votes,
-                max_per_speaker=args.max_per_speaker,
+                max_per_speaker=args.max_per_speaker, accent=args.accent,
             )
             # Converted files may live in a temp dir: always copy them out.
             summary = write_dataset(clips, args.out, args.holdout, "copy" if args.work_dir is None else args.link)

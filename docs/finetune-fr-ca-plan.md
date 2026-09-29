@@ -246,6 +246,37 @@ les clips retenus. Même sortie qu'en B.
 
 ## 4. Phase 2 — Entraînement LoRA et fusion
 
+> **Implémenté** — commandes réelles (environnement : `requirements-finetune.txt`) :
+>
+> ```bash
+> python -m scripts.finetune.setup_toolkit --run-dir data/finetune/runs/fr_ca_r16 \
+>     --data-dir data/finetune/qc/audio_data            # télécharge, vérifie SHA-256, patche
+> python data/finetune/runs/fr_ca_r16/toolkit/lora.py   # entraînement (GPU)
+> python data/finetune/runs/fr_ca_r16/toolkit/fix_merged_model.py
+> python -m scripts.finetune.validate_t3_checkpoint \
+>     data/finetune/runs/fr_ca_r16/merged_model/t3_fr_ca.safetensors --strict-load \
+>     --smoke-reference data/finetune/qc/audio_data/audio/<clip du holdout>.wav
+> python -m scripts.finetune.merge_adapter --adapter data/finetune/runs/fr_ca_r16/checkpoint_epoch1_stepN.pt \
+>     --out data/finetune/runs/fr_ca_r16/t3_fr_ca_e1.safetensors   # export d'une époque intermédiaire
+> ```
+>
+> **Deux écarts découverts en exécutant réellement le toolkit** (mini-entraînement CPU) :
+>
+> 1. **Cibles de parole sans BOS/EOS.** Le toolkit entraîne sur les tokens S3 bruts, sans
+>    `start_speech_token` (6561) ni `stop_speech_token` (6562), alors que l'inférence démarre
+>    sur l'un et s'arrête sur l'autre. `setup_toolkit` encadre désormais les cibles comme à
+>    l'inférence (correct par construction, **non prouvé expérimentalement** ;
+>    `--upstream-speech-targets` rétablit le cadrage amont pour comparer sur GPU).
+>    Un mini-entraînement CPU volontairement agressif (LR 1e-3) produisait 40 s d'audio pour
+>    une phrase de 7 mots, avec **et** sans ce correctif : c'est le LR qui casse le modèle.
+>    D'où le contrôle ajouté à `validate_t3_checkpoint --smoke-reference`, qui échoue si le
+>    débit tombe sous 3 caractères/s.
+> 2. **`WARMUP_STEPS` n'est jamais utilisé** (le planificateur est un cosinus simple) : le
+>    réglage `WARMUP_STEPS = 200` ci-dessous est sans effet et n'est pas exposé.
+>
+> Les patches effectivement appliqués sont documentés en tête de `scripts/finetune/setup_toolkit.py`.
+> La spécification d'origine suit.
+
 ### 4.1 Environnement (séparé de l'app)
 
 ```bash
@@ -361,6 +392,28 @@ python -m scripts.finetune.validate_t3_checkpoint data/finetune/runs/fr_ca_r16/m
 
 ## 5. Phase 3 — Évaluation base v3 vs `fr-ca`
 
+> **Implémenté** — `scripts/finetune/eval/` (dépendances : section « Phase 3 » de `requirements-finetune.txt`) :
+>
+> ```bash
+> E=data/finetune/eval/fr_ca_r16
+> # négatifs de la sonde : clips européens (Common Voice complet requis)
+> python -m scripts.finetune.prepare_qc_dataset from-common-voice --accent europe \
+>     --cv-dir <cv-corpus-fr> --out data/finetune/eu/audio_data
+> python -m scripts.finetune.eval.accent_probe train --out data/finetune/eval/accent_probe.npz \
+>     --positive data/finetune/qc/audio_data --negative data/finetune/eu/audio_data   # exige ≥ 0,8 d'exactitude
+> python -m scripts.finetune.eval.battery --out $E --checkpoint base=v3 \
+>     --checkpoint fr_ca=data/finetune/runs/fr_ca_r16/merged_model/t3_fr_ca.safetensors \
+>     --voice me=<ta référence>.wav --voice qc1=<holdout> --voice qc2=<holdout>   # 600 clips, reprise possible
+> python -m scripts.finetune.eval.score --battery $E --probe data/finetune/eval/accent_probe.npz
+> python -m scripts.finetune.eval.abx make --battery $E --candidate fr_ca --voice me   # puis remplir abx/pairs.csv
+> python -m scripts.finetune.eval.report --battery $E    # report.md + checkpoint recommandé (exit 1 si aucun)
+> ```
+>
+> Plusieurs époques : ajouter un `--checkpoint fr_ca_e1=...` par export de `merge_adapter`, le rapport
+> les compare tous à la base, CFG par CFG. Relancer `score` ne calcule que les colonnes manquantes.
+> La batterie (`sentences_qc.tsv`) écrit les nombres en toutes lettres ; la normalisation WER
+> (`eval/text.py`) épelle les chiffres de l'ASR et ramène le lexique QC à sa forme standard des deux côtés.
+
 ### 5.1 Matériel de test — `scripts/finetune/eval/`
 
 - `sentences_qc.txt` : **50 phrases** ciblant les traits québécois. Exemples à compléter :
@@ -399,6 +452,30 @@ Sortie : `report.md` avec un tableau conditions × métriques, et les 600 clips 
 
 ## 6. Phase 4 — Ta propre voix (identité + accent)
 
+> **Implémenté** — commandes réelles :
+>
+> ```bash
+> # 1. enregistrements longs (m4a, wav, webm...) → clips 2-12 s transcrits, 5 clips de holdout
+> python -m scripts.finetune.segment_recording --out data/finetune/me/audio_data --speaker me recordings/*.m4a
+> #    → RELIRE metadata.csv / holdout.csv : remettre pis, chu, faque, tsé... là où Whisper a standardisé
+> # 2. tes clips ×3 + 30 % du corpus QC
+> python -m scripts.finetune.build_personal_dataset --own data/finetune/me/audio_data \
+>     --qc data/finetune/qc/audio_data --out data/finetune/me_mix/audio_data
+> # 3. seconde étape, repartie du fr-ca retenu en phase 3
+> python -m scripts.finetune.setup_toolkit --run-dir data/finetune/runs/fr_ca_me \
+>     --data-dir data/finetune/me_mix/audio_data --output-name t3_fr_ca_me \
+>     --base-t3 data/finetune/runs/fr_ca_r16/merged_model/t3_fr_ca.safetensors --lr 1e-5 --epochs 2
+> python data/finetune/runs/fr_ca_me/toolkit/lora.py && python data/finetune/runs/fr_ca_me/toolkit/fix_merged_model.py
+> python -m scripts.finetune.validate_t3_checkpoint data/finetune/runs/fr_ca_me/merged_model/t3_fr_ca_me.safetensors \
+>     --base data/finetune/runs/fr_ca_r16/merged_model/t3_fr_ca.safetensors --strict-load \
+>     --smoke-reference data/finetune/me/audio_data/audio/<un de tes clips de holdout>.wav
+> ```
+>
+> `--base-t3` sert aussi à l'entraînement **et** à la fusion : le résultat est `fr-ca + LoRA perso`.
+> Le holdout de tes clips se fait clip par clip (un seul locuteur). La validation interne du toolkit
+> tire au hasard parmi des doublons suréchantillonnés : sa perte de validation est optimiste ; juger
+> sur l'évaluation de la phase 3 (voix `me` = un clip du holdout).
+
 Optionnelle mais c'est le meilleur résultat possible : le modèle apprend **ta** prononciation.
 
 1. **Enregistrer 30–60 min** : pièce calme, même micro, 24 kHz+ mono, registre naturel
@@ -426,6 +503,13 @@ Optionnelle mais c'est le meilleur résultat possible : le modèle apprend **ta*
 
 ## 7. Phase 5 — Déploiement
 
+> **Implémenté** : procédure de déploiement / retour arrière dans le README (section *Regional
+> accents*) ; les voix `fr` démarrent sur le preset *Faithful accent* tant que l'utilisateur n'a
+> touché à aucun réglage (vérifié dans Chromium) ;
+> `python -m scripts.finetune.model_card --checkpoint … --report … --out README.md` génère la fiche
+> Hugging Face (métadonnées, SHA-256, rapport d'évaluation) et **refuse** tout checkpoint de seconde
+> étape ou entraîné sur des clips `audio/own_*` (ta voix).
+
 1. Copier le checkpoint retenu dans le volume : `data/models/t3_fr_ca.safetensors`
    (`docker-compose` monte `./data` sur `/data`, `DATA_DIR=/data`).
 2. `.env` : `CHATTERBOX_T3_MODEL=models/t3_fr_ca.safetensors`.
@@ -448,6 +532,7 @@ Optionnelle mais c'est le meilleur résultat possible : le modèle apprend **ta*
 | Le toolkit part de **v2** (défaut) → checkpoint incompatible/inférieur | patches #1 et #2 (§4.2) ; validation 4.6 compare aux clés/shapes de **v3** |
 | Fork du toolkit installé comme paquet (`chatterbox-tts` 0.1.4, pré-v3) | n'installer que Chatterbox au commit de l'app ; copier uniquement `lora.py` + `fix_merged_model.py` |
 | `load_state_dict` strict échoue | validation 4.6 avant tout déploiement ; jamais de clé `lora_*` |
+| Le modèle ne s'arrête plus de parler (LR trop fort, ou fin de parole mal apprise) | contrôle de débit du fumage (§4.6) ; LR 2e-5 ; cadrage BOS/EOS (comparable via `--upstream-speech-targets`) |
 | Parole lue Common Voice = prosodie plate → sortie moins expressive | peu d'époques, rank 16, LoRA sur l'attention/MLP seulement ; phase 4 ré-injecte de la parole naturelle |
 | Un locuteur domine le corpus | option B : plafond par `client_id` ; sinon écoute d'échantillons |
 | WER gonflé par la normalisation ASR du lexique QC | table de mapping des deux côtés (§5.2) ; juger surtout ΔWER, pas la valeur absolue |

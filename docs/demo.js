@@ -26,6 +26,7 @@
     jobs: new Map(),
     jobNodes: new Map(),
     selectedVoice: null,
+    settingsTouched: false,
     recordedTone: null,
     recording: false,
     recordTimer: null,
@@ -177,6 +178,7 @@
     state.selectedVoice = id;
     const voice = state.voices.find((v) => v.id === id);
     if (voice?.language) $("#gen-language").value = voice.language;
+    defaultPresetFor(voice);
     renderVoices();
   }
 
@@ -396,6 +398,7 @@
     if (job.language) $("#gen-language").value = job.language;
     if (state.voices.some((v) => v.id === job.voice_id)) selectVoice(job.voice_id);
     const p = job.params || {};
+    state.settingsTouched = true;
     setSliders(p);
     $("#seed").value = p.seed ?? "";
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -422,6 +425,15 @@
 
   function applyPreset(btn) {
     setSliders(Object.fromEntries(SLIDERS.map(([, , key, attr]) => [key, btn.dataset[attr]])));
+  }
+
+  // French voices default to "Faithful accent" (keeps a regional accent such as
+  // Quebec French) until the user picks settings themselves.
+  function defaultPresetFor(voice) {
+    if (state.settingsTouched) return;
+    const name = voice?.language === "fr" ? "faithful" : "neutral";
+    const btn = document.querySelector(`.preset[data-preset="${name}"]`);
+    if (btn) applyPreset(btn);
   }
 
   function markPreset() {
@@ -475,10 +487,14 @@
     for (const [slider, output] of SLIDERS) {
       $(slider).addEventListener("input", (e) => {
         $(output).textContent = Number(e.target.value).toFixed(2);
+        state.settingsTouched = true;
         markPreset();
       });
     }
-    document.querySelectorAll(".preset").forEach((btn) => btn.addEventListener("click", () => applyPreset(btn)));
+    document.querySelectorAll(".preset").forEach((btn) => btn.addEventListener("click", () => {
+      state.settingsTouched = true;
+      applyPreset(btn);
+    }));
     markPreset();
     document.querySelectorAll(".tab").forEach((tab) => {
       tab.addEventListener("click", () => {

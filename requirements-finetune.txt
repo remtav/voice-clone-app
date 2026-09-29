@@ -1,0 +1,22 @@
+# Fine-tuning environment for scripts/finetune (NOT installed in the app image).
+# Use a separate venv with a CUDA GPU (>= 16 GB VRAM, 24 GB recommended):
+#
+#   python3.11 -m venv .venv-ft && . .venv-ft/bin/activate
+#   pip install torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+#   pip install -r requirements-finetune.txt
+#
+# Same Chatterbox commit as requirements-engine.txt, so checkpoints trained here
+# load in the app.  Do NOT pip install the LoRA toolkit's repository: it ships an
+# older chatterbox-tts (0.1.4, pre-v3).  scripts/finetune/setup_toolkit.py
+# downloads just its two scripts at a pinned commit.
+chatterbox-tts @ git+https://github.com/resemble-ai/chatterbox.git@5de7a54aa4e5e2baadb0182dde554908b48b85c2
+pandas
+matplotlib
+tqdm
+soundfile
+safetensors
+huggingface_hub
+# Phase 3 evaluation (scripts/finetune/eval)
+faster-whisper
+speechbrain
+num2words

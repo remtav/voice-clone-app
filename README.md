@@ -159,14 +159,40 @@ voice comes out with a France-French accent even when the reference speaks
 Quebec French. Two levers, in order of cost:
 
 1. **Settings.** Pick the *Faithful accent* preset (higher CFG weight follows
-   the reference more closely) and make sure the **first 6 seconds** of the
-   reference carry the accent: only they condition pronunciation.
+   the reference more closely; French voices start on it until you change a
+   setting) and make sure the **first 6 seconds** of the reference carry the
+   accent: only they condition pronunciation.
 2. **A fine-tuned T3 checkpoint.** Train a regional finetune (the way Resemble
    ships `pt-br` or `es-mx-latam`), copy it into the data volume and point
    `CHATTERBOX_T3_MODEL` at it, e.g. `models/t3_fr_ca.safetensors`. The status
    bar then shows `custom T3 t3_fr_ca.safetensors`; remove the variable to go
    back to the official v3. The full recipe for Quebec French is in
-   [`docs/finetune-fr-ca-plan.md`](docs/finetune-fr-ca-plan.md).
+   [`docs/finetune-fr-ca-plan.md`](docs/finetune-fr-ca-plan.md); the tooling
+   lives in `scripts/finetune/` (separate environment:
+   `requirements-finetune.txt`, CUDA GPU).
+
+Deploying a fine-tuned checkpoint:
+
+```bash
+# 1. never deploy an unchecked file
+python -m scripts.finetune.validate_t3_checkpoint path/to/t3_fr_ca.safetensors --strict-load
+# 2. copy it into the data volume (./data is /data in the container)
+mkdir -p data/models && cp path/to/t3_fr_ca.safetensors data/models/
+# 3. point the app at it, reload, check
+echo "CHATTERBOX_T3_MODEL=models/t3_fr_ca.safetensors" >> .env
+docker compose up -d
+curl -s localhost:8000/api/config | grep -o '"model_id":"[^"]*"'   # ... custom T3 t3_fr_ca.safetensors
+```
+
+A missing or broken file shows in `/api/status` as `load_error`. To roll back,
+delete the `CHATTERBOX_T3_MODEL` line (or set it to `v3`) and run
+`docker compose up -d` again.
+
+To share a checkpoint trained on public data only,
+`python -m scripts.finetune.model_card` writes a Hugging Face model card
+(tensor metadata, SHA-256, evaluation report). It refuses checkpoints
+trained on your own recordings: those encode your voice and must stay
+private.
 
 ## HTTP API
 
