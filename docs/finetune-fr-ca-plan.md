@@ -452,6 +452,30 @@ Sortie : `report.md` avec un tableau conditions × métriques, et les 600 clips 
 
 ## 6. Phase 4 — Ta propre voix (identité + accent)
 
+> **Implémenté** — commandes réelles :
+>
+> ```bash
+> # 1. enregistrements longs (m4a, wav, webm...) → clips 2-12 s transcrits, 5 clips de holdout
+> python -m scripts.finetune.segment_recording --out data/finetune/me/audio_data --speaker me recordings/*.m4a
+> #    → RELIRE metadata.csv / holdout.csv : remettre pis, chu, faque, tsé... là où Whisper a standardisé
+> # 2. tes clips ×3 + 30 % du corpus QC
+> python -m scripts.finetune.build_personal_dataset --own data/finetune/me/audio_data \
+>     --qc data/finetune/qc/audio_data --out data/finetune/me_mix/audio_data
+> # 3. seconde étape, repartie du fr-ca retenu en phase 3
+> python -m scripts.finetune.setup_toolkit --run-dir data/finetune/runs/fr_ca_me \
+>     --data-dir data/finetune/me_mix/audio_data --output-name t3_fr_ca_me \
+>     --base-t3 data/finetune/runs/fr_ca_r16/merged_model/t3_fr_ca.safetensors --lr 1e-5 --epochs 2
+> python data/finetune/runs/fr_ca_me/toolkit/lora.py && python data/finetune/runs/fr_ca_me/toolkit/fix_merged_model.py
+> python -m scripts.finetune.validate_t3_checkpoint data/finetune/runs/fr_ca_me/merged_model/t3_fr_ca_me.safetensors \
+>     --base data/finetune/runs/fr_ca_r16/merged_model/t3_fr_ca.safetensors --strict-load \
+>     --smoke-reference data/finetune/me/audio_data/audio/<un de tes clips de holdout>.wav
+> ```
+>
+> `--base-t3` sert aussi à l'entraînement **et** à la fusion : le résultat est `fr-ca + LoRA perso`.
+> Le holdout de tes clips se fait clip par clip (un seul locuteur). La validation interne du toolkit
+> tire au hasard parmi des doublons suréchantillonnés : sa perte de validation est optimiste ; juger
+> sur l'évaluation de la phase 3 (voix `me` = un clip du holdout).
+
 Optionnelle mais c'est le meilleur résultat possible : le modèle apprend **ta** prononciation.
 
 1. **Enregistrer 30–60 min** : pièce calme, même micro, 24 kHz+ mono, registre naturel

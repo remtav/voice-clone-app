@@ -113,17 +113,24 @@ def _stable_rank(value: str) -> str:
     return hashlib.sha1(value.encode("utf-8")).hexdigest()
 
 
-def split_holdout(clips: list[Clip], n: int = HOLDOUT_CLIPS) -> tuple[list[Clip], list[Clip]]:
+def split_holdout(
+    clips: list[Clip], n: int = HOLDOUT_CLIPS, by_speaker: bool = True
+) -> tuple[list[Clip], list[Clip]]:
     """Deterministically hold out ~n clips.
 
-    When speakers are known, whole speakers are held out so evaluation voices
-    are never seen in training; otherwise individual clips are.
+    With ``by_speaker`` and known speakers, whole speakers are held out so
+    evaluation voices are never seen in training; otherwise individual clips are
+    (e.g. a single speaker's own recordings).
     """
     if n <= 0 or not clips:
         return list(clips), []
+
+    def group(clip: Clip) -> str:
+        return clip.client_id if by_speaker and clip.client_id else f"clip:{clip.name}"
+
     groups: dict[str, list[Clip]] = {}
     for clip in clips:
-        groups.setdefault(clip.client_id or f"clip:{clip.name}", []).append(clip)
+        groups.setdefault(group(clip), []).append(clip)
     held: set[str] = set()
     count = 0
     for key in sorted(groups, key=_stable_rank):
@@ -133,8 +140,8 @@ def split_holdout(clips: list[Clip], n: int = HOLDOUT_CLIPS) -> tuple[list[Clip]
             break  # always keep at least one group for training
         held.add(key)
         count += len(groups[key])
-    train = [c for c in clips if (c.client_id or f"clip:{c.name}") not in held]
-    holdout = [c for c in clips if (c.client_id or f"clip:{c.name}") in held]
+    train = [c for c in clips if group(c) not in held]
+    holdout = [c for c in clips if group(c) in held]
     return train, holdout
 
 
@@ -297,12 +304,14 @@ def _write_csv(path: Path, clips: list[Clip]) -> None:
             writer.writerow([f"audio/{clip.name}", clip.text, f"{clip.duration:.3f}", clip.client_id])
 
 
-def write_dataset(clips: list[Clip], out: Path, holdout_clips: int = HOLDOUT_CLIPS, link: str = "hardlink") -> dict:
+def write_dataset(
+    clips: list[Clip], out: Path, holdout_clips: int = HOLDOUT_CLIPS, link: str = "hardlink", by_speaker: bool = True
+) -> dict:
     names = Counter(c.name for c in clips)
     clashes = [n for n, k in names.items() if k > 1]
     if clashes:
         raise ValueError(f"Duplicate audio file names: {clashes[:5]}")
-    train, holdout = split_holdout(clips, holdout_clips)
+    train, holdout = split_holdout(clips, holdout_clips, by_speaker)
     audio = out / "audio"
     audio.mkdir(parents=True, exist_ok=True)
     for clip in clips:
