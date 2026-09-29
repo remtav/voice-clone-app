@@ -396,12 +396,39 @@
     if (job.language) $("#gen-language").value = job.language;
     if (state.voices.some((v) => v.id === job.voice_id)) selectVoice(job.voice_id);
     const p = job.params || {};
-    for (const [slider, out, key] of [["#exaggeration", "#exaggeration-val", "exaggeration"], ["#cfg", "#cfg-val", "cfg_weight"], ["#temp", "#temp-val", "temperature"]]) {
-      if (p[key] != null) { $(slider).value = p[key]; $(out).textContent = (+p[key]).toFixed(2); }
-    }
+    setSliders(p);
     $("#seed").value = p.seed ?? "";
     window.scrollTo({ top: 0, behavior: "smooth" });
     $("#gen-text").focus();
+  }
+
+
+  // ---------------------------------------------------------------- presets
+  // [slider, output, job param, preset data attribute]
+  const SLIDERS = [
+    ["#exaggeration", "#exaggeration-val", "exaggeration", "exag"],
+    ["#cfg", "#cfg-val", "cfg_weight", "cfg"],
+    ["#temp", "#temp-val", "temperature", "temp"],
+  ];
+
+  function setSliders(values) {
+    for (const [slider, output, key] of SLIDERS) {
+      if (values[key] == null) continue;
+      $(slider).value = values[key];
+      $(output).textContent = Number(values[key]).toFixed(2);
+    }
+    markPreset();
+  }
+
+  function applyPreset(btn) {
+    setSliders(Object.fromEntries(SLIDERS.map(([, , key, attr]) => [key, btn.dataset[attr]])));
+  }
+
+  function markPreset() {
+    document.querySelectorAll(".preset").forEach((btn) => {
+      const match = SLIDERS.every(([slider, , , attr]) => Math.abs(Number($(slider).value) - Number(btn.dataset[attr])) < 1e-6);
+      btn.classList.toggle("active", match);
+    });
   }
 
   function deleteJob(id) {
@@ -445,9 +472,14 @@
     $("#gen-voice").addEventListener("change", (e) => selectVoice(e.target.value));
     $("#refresh-jobs").addEventListener("click", () => toast("This is a static demo — nothing to refresh"));
 
-    for (const [slider, output] of [["#exaggeration", "#exaggeration-val"], ["#cfg", "#cfg-val"], ["#temp", "#temp-val"]]) {
-      $(slider).addEventListener("input", (e) => ($(output).textContent = (+e.target.value).toFixed(2)));
+    for (const [slider, output] of SLIDERS) {
+      $(slider).addEventListener("input", (e) => {
+        $(output).textContent = Number(e.target.value).toFixed(2);
+        markPreset();
+      });
     }
+    document.querySelectorAll(".preset").forEach((btn) => btn.addEventListener("click", () => applyPreset(btn)));
+    markPreset();
     document.querySelectorAll(".tab").forEach((tab) => {
       tab.addEventListener("click", () => {
         document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t === tab));

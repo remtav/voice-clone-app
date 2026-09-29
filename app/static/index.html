@@ -43,7 +43,8 @@
 
           <div id="tab-record" class="tab-panel">
             <p class="muted small">Read a few sentences naturally, in the language you want to clone.
-              5–15 seconds of clean speech without background noise works best.</p>
+              5–15 seconds of clean speech without background noise works best. The first 6 seconds
+              drive pronunciation and accent, so start with your most typical speech.</p>
             <div class="record-controls">
               <button id="record-btn" class="btn btn-danger" type="button">● Record</button>
               <span id="record-timer" class="timer">0:00</span>
@@ -84,6 +85,14 @@
 
             <details class="advanced">
               <summary>Advanced settings</summary>
+              <div class="presets" role="group" aria-label="Presets">
+                <button class="btn small preset" type="button" data-exag="0.5" data-cfg="0.5" data-temp="0.8"
+                        title="Chatterbox defaults">Neutral</button>
+                <button class="btn small preset" type="button" data-exag="0.4" data-cfg="0.8" data-temp="0.6"
+                        title="Follow the reference closely: keeps a regional accent">Faithful accent</button>
+                <button class="btn small preset" type="button" data-exag="0.7" data-cfg="0.3" data-temp="0.8"
+                        title="More emotion, slower pace">Expressive</button>
+              </div>
               <div class="sliders">
                 <label class="field">Exaggeration <output id="exaggeration-val">0.50</output>
                   <input type="range" id="exaggeration" min="0" max="1.5" step="0.05" value="0.5">
@@ -100,7 +109,9 @@
               </div>
               <p class="muted small">
                 Defaults (0.5 / 0.5) suit most voices. For more expressive speech try exaggeration ≈ 0.7 with
-                CFG ≈ 0.3. If the speaker is fast, lower CFG to ≈ 0.3. A fixed seed makes results reproducible.
+                CFG ≈ 0.3. If the speaker is fast, lower CFG to ≈ 0.3. To keep a regional accent (e.g. Quebec
+                French), use <em>Faithful accent</em>: a higher CFG follows the reference more closely. A fixed
+                seed makes results reproducible.
               </p>
             </details>
 
