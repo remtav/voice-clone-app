@@ -8,6 +8,11 @@ Tunnel with password protection.
 Everything in the stack is open source and free software: the engine, the
 model weights, the server, the front-end and the tunnel client.
 
+**UI preview:** a static, non-functional mockup of the front-end is published to
+GitHub Pages at `https://remtav.github.io/voice-clone-app/` (see [`docs/`](docs/)).
+It simulates the interface in the browser with no backend; the real app needs a
+GPU.
+
 ## Engine choice: Chatterbox (Resemble AI)
 
 The engine is [Chatterbox](https://github.com/resemble-ai/chatterbox), picked
