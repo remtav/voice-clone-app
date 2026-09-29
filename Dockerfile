@@ -1,11 +1,15 @@
-# Voice Clone App - GPU image (CUDA 12.4, PyTorch 2.6, Python 3.11)
+# Voice Clone App - GPU images (CUDA 12.4, PyTorch 2.6, Python 3.11)
+#
+# Two targets share one base layer (PyTorch + Chatterbox):
+#   app      the web app and generation worker   (docker compose service "app")
+#   trainer  the fine-tuning service             (docker compose service "trainer")
 #
 # Build:  docker compose build
 # Run:    docker compose up -d
 #
 # The PyTorch runtime image already contains torch/torchaudio 2.6.0 with CUDA
 # 12.4, which is exactly what chatterbox-tts pins, so no second torch download.
-FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
+FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime AS base
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
@@ -26,10 +30,30 @@ COPY requirements.txt requirements-engine.txt ./
 RUN pip install -r requirements.txt \
     && pip install -r requirements-engine.txt
 
+VOLUME ["/data"]
+
+# ---------------------------------------------------------------------------
+# Fine-tuning service: same base plus the training/evaluation extras.  It reads
+# queued runs from the app's database on /data and uses the GPU only while the
+# app has released it.
+FROM base AS trainer
+
+COPY requirements-finetune.txt ./
+RUN pip install -r requirements-finetune.txt
+
+COPY app ./app
+COPY scripts ./scripts
+COPY trainer ./trainer
+
+CMD ["python", "-m", "trainer"]
+
+# ---------------------------------------------------------------------------
+# Web app (last stage: the default target of a plain "docker build").
+FROM base AS app
+
 COPY app ./app
 COPY scripts ./scripts
 
-VOLUME ["/data"]
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=180s --retries=5 \

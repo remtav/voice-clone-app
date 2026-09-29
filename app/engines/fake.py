@@ -21,8 +21,22 @@ class FakeEngine(Engine):
     multilingual = True
     languages = dict(LANGUAGE_NAMES)
 
+    def __init__(self) -> None:
+        super().__init__()
+        self.t3_model = "v3"
+
     def load(self) -> None:
         self._loaded = True
+
+    def set_t3(self, t3_model: str, t3_path: Path | None) -> None:
+        if t3_path is not None and not t3_path.is_file():
+            raise FileNotFoundError(f"T3 checkpoint not found: {t3_path}")
+        self.t3_model = t3_path.name if t3_path is not None else t3_model
+
+    def info(self) -> dict:
+        data = super().info()
+        data["t3_model"] = self.t3_model
+        return data
 
     def synthesize(self, text: str, reference_wav: Path, params: SynthesisParams) -> np.ndarray:
         if not self._loaded:

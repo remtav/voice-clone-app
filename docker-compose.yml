@@ -1,6 +1,8 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      target: app
     image: voice-clone-app:latest
     container_name: voice-clone-app
     restart: unless-stopped
@@ -15,6 +17,37 @@ services:
       # Bound to localhost only: the internet reaches the app through the
       # Cloudflare tunnel below, never through this port.
       - "127.0.0.1:8000:8000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # Fine-tuning service (optional): runs the training jobs started from the web UI.
+  # It shares the data volume (database, datasets, checkpoints) and the GPU; the
+  # app unloads its model while a run is active, so one GPU is enough.
+  # Start it with:  docker compose up -d trainer
+  trainer:
+    build:
+      context: .
+      target: trainer
+    image: voice-clone-trainer:latest
+    container_name: voice-clone-trainer
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      HF_HOME: /data/hf-cache
+    volumes:
+      - ./data:/data
+    # tini as PID 1: reaps the DataLoader workers of a cancelled run.
+    init: true
+    # PyTorch DataLoader workers exchange batches through shared memory (Docker's default is 64 MB).
+    shm_size: "8gb"
+    # docker stop: give the current run time to stop cleanly before SIGKILL.
+    stop_grace_period: 60s
     deploy:
       resources:
         reservations:

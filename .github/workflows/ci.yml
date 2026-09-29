@@ -19,7 +19,7 @@ jobs:
       - name: Install Python deps
         run: pip install -r requirements.txt -r requirements-dev.txt
       - name: Lint
-        run: ruff check app tests scripts
+        run: ruff check app tests scripts trainer
       - name: Test (fake engine, no GPU)
         run: pytest
 

@@ -12,7 +12,7 @@ test:
 	pytest
 
 lint:
-	ruff check app tests scripts
+	ruff check app tests scripts trainer
 
 build:
 	docker compose build

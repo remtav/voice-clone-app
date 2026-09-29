@@ -125,6 +125,7 @@ audio { width: 100%; height: 36px; }
 .badge.done { background: rgba(62, 207, 142, 0.15); color: var(--ok); }
 .badge.failed { background: rgba(255, 93, 108, 0.15); color: var(--danger); }
 .badge.cancelled { background: #2b3040; }
+.badge.waiting_gpu { background: rgba(245, 184, 76, 0.15); color: var(--warn); }
 
 .progress { height: 6px; background: #2b3040; border-radius: 999px; overflow: hidden; }
 .progress > div { height: 100%; background: var(--accent); width: 0; transition: width 0.4s; }
@@ -138,3 +139,16 @@ audio { width: 100%; height: 36px; }
 }
 .toast.error { border-color: var(--danger); }
 .toast.ok { border-color: var(--ok); }
+
+/* Fine-tuning ------------------------------------------------------------- */
+.training-active #gen-btn { opacity: 0.5; pointer-events: none; }
+.gen-note { margin: 0; font-size: 0.85rem; color: var(--warn); }
+.trainer-status { color: var(--muted); }
+.trainer-status.ok { color: var(--ok); }
+.trainer-status.err { color: var(--danger); }
+.model-row { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 8px; }
+.model-row .field { flex: 1; min-width: 220px; }
+.run-meta { color: var(--muted); font-size: 0.8rem; }
+.run-stage { font-size: 0.85rem; }
+.run-log { max-height: 260px; overflow: auto; margin: 0; padding: 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: #0f1117; color: #c9cdd8; font-size: 0.75rem; white-space: pre-wrap; word-break: break-word; }

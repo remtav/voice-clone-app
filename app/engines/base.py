@@ -99,6 +99,14 @@ class Engine(ABC):
     def synthesize(self, text: str, reference_wav: Path, params: SynthesisParams) -> np.ndarray:
         """Return mono float32 audio at ``self.sample_rate`` for ``text``."""
 
+    def unload(self) -> None:
+        """Free the model (and its GPU memory) so another process can use the GPU."""
+        self._loaded = False
+
+    def set_t3(self, t3_model: str, t3_path: Path | None) -> None:
+        """Switch the T3 checkpoint (``v2``/``v3`` or a fine-tuned file), in place if loaded."""
+        raise NotImplementedError(f"Engine '{self.name}' has no swappable T3 checkpoint")
+
     def convert(self, source_wav: Path, reference_wav: Path, params: ConversionParams) -> np.ndarray:
         """Convert ``source_wav`` to the voice in ``reference_wav``.
 
