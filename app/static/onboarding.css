@@ -1,0 +1,71 @@
+/* Onboarding: welcome modal, section "?" popovers, empty-state hints, Help button.
+   Dependency-free; shared verbatim by the real app (app/static) and the demo (docs). */
+
+/* Help button in the top bar */
+#ob-help { white-space: nowrap; }
+#ob-help::before { content: "?"; display: inline-grid; place-items: center; width: 18px; height: 18px; margin-right: 6px; border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 0.75rem; }
+
+/* Section header help trigger */
+.ob-tip-btn {
+  appearance: none; border: 1px solid var(--border); background: var(--panel-2); color: var(--muted);
+  width: 20px; height: 20px; border-radius: 50%; font-size: 0.75rem; font-weight: 700; line-height: 1;
+  margin-left: 8px; cursor: pointer; vertical-align: middle; padding: 0;
+}
+.ob-tip-btn:hover, .ob-tip-btn[aria-expanded="true"] { color: #fff; background: var(--accent); border-color: var(--accent); }
+h2 .ob-tip-btn { transform: translateY(-1px); }
+
+/* Popover */
+.ob-popover {
+  position: fixed; z-index: 40; max-width: 300px; padding: 12px 14px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow); color: var(--text); font-size: 0.85rem; line-height: 1.5;
+}
+.ob-popover h4 { margin: 0 0 4px; font-size: 0.85rem; }
+.ob-popover p { margin: 0; color: var(--muted); }
+.ob-popover::after {
+  content: ""; position: absolute; top: -6px; left: var(--arrow-x, 20px);
+  width: 10px; height: 10px; background: var(--panel-2);
+  border-left: 1px solid var(--border); border-top: 1px solid var(--border); transform: rotate(45deg);
+}
+
+/* Welcome modal */
+.ob-backdrop {
+  position: fixed; inset: 0; z-index: 50; display: grid; place-items: center;
+  background: rgba(6, 8, 14, 0.66); padding: 16px;
+}
+.ob-backdrop[hidden] { display: none; }
+.ob-modal {
+  width: min(460px, 100%); background: var(--panel); border: 1px solid var(--border);
+  border-radius: 14px; box-shadow: var(--shadow); padding: 22px; position: relative;
+}
+.ob-modal .ob-close {
+  position: absolute; top: 12px; right: 12px; background: none; border: none;
+  color: var(--muted); font-size: 1.1rem; cursor: pointer; padding: 4px 8px;
+}
+.ob-modal .ob-close:hover { color: var(--text); }
+.ob-slide-icon { font-size: 2.2rem; line-height: 1; }
+.ob-step-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); margin: 10px 0 4px; }
+.ob-slide h3 { margin: 0 0 8px; font-size: 1.2rem; }
+.ob-slide p { margin: 0; color: var(--muted); line-height: 1.55; }
+.ob-slide .kbd { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.85em; background: var(--panel-2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; }
+
+.ob-dots { display: flex; gap: 6px; justify-content: center; margin: 18px 0; }
+.ob-dots button { width: 8px; height: 8px; border-radius: 50%; border: none; background: var(--border); cursor: pointer; padding: 0; }
+.ob-dots button.active { background: var(--accent); }
+
+.ob-actions { display: flex; align-items: center; gap: 8px; }
+.ob-actions .spacer { flex: 1; }
+
+/* Empty-state hints */
+.ob-empty {
+  border: 1px dashed var(--border); border-radius: 10px; padding: 14px 16px;
+  background: rgba(108, 140, 255, 0.06); color: var(--muted); font-size: 0.9rem;
+}
+.ob-empty strong { color: var(--text); }
+.ob-empty ol { margin: 8px 0 0; padding-left: 18px; }
+.ob-empty li { margin: 2px 0; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .ob-modal { animation: ob-pop 0.18s ease-out; }
+  @keyframes ob-pop { from { transform: translateY(8px) scale(0.98); opacity: 0; } to { transform: none; opacity: 1; } }
+}
