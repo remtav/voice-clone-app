@@ -135,6 +135,9 @@
       } else if (s.model_loading) {
         cls = "busy";
         parts.push("Loading model… (first start downloads several GB)");
+      } else if (!s.loaded && s.training) {
+        cls = "busy";
+        parts.push("Model released for training");
       } else if (!s.loaded) {
         cls = "busy";
         parts.push("Model not loaded yet (loads on first generation)");
@@ -148,6 +151,10 @@
         parts.push(`generating ${s.current_job_id}`);
       }
       if (s.queue_size) parts.push(`${s.queue_size} queued`);
+      if (s.training) {
+        cls = cls === "err" ? cls : "busy";
+        parts.push(`training "${s.training.name}" ${Math.round((s.training.progress || 0) * 100)}% — generation paused`);
+      }
       bar.className = `status ${cls}`;
       bar.innerHTML = "";
       bar.append(el("span", { class: "dot" }), document.createTextNode(parts.join(" · ")));

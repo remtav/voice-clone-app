@@ -194,6 +194,39 @@ To share a checkpoint trained on public data only,
 trained on your own recordings: those encode your voice and must stay
 private.
 
+### Fine-tuning from the web UI (trainer service)
+
+The *Fine-tuning* card runs the whole recipe from the browser: dataset, LoRA
+training, export, validation, and publishing into `data/models`. Then *Use this
+model* switches generation to it without a restart (the T3 weights are swapped
+in place; the choice survives restarts). The work is done by a separate
+**trainer** container, which shares the data volume (database, datasets,
+checkpoints) and the GPU:
+
+```bash
+docker compose build          # builds both images (the trainer adds the fine-tuning extras)
+docker compose up -d trainer  # optional service; the card says when it is offline
+```
+
+- **One GPU, one job at a time.** When a run starts, the app finishes the
+  generation in progress, unloads its model and refuses new generations
+  (HTTP 409) until the run ends. The trainer starts only once the app has let
+  go of the model and `nvidia-smi` shows at least `TRAINER_MIN_FREE_VRAM_GB`
+  free (16 GB by default, comfortable on a 24 GB card such as an RTX 3090).
+- **Recipes.** *Quebec accent* trains on the public Common Voice Quebec corpus
+  (downloaded and prepared on the first run, 1.8 GB) on top of the official
+  v3; count 3–6 h on a 3090. *My voice* starts from one of your Quebec models
+  and needs your recordings in `data/finetune/me/audio_data` (prepare them with
+  `scripts.finetune.segment_recording`, see
+  [`docs/finetune-fr-ca-plan.md`](docs/finetune-fr-ca-plan.md)).
+- **Validation gate.** A checkpoint is only published if it passes
+  `validate_t3_checkpoint` (tensor structure, strict load, and a smoke synthesis
+  whose speaking rate catches a model that no longer stops talking).
+- **Cancel / restart.** Cancelling stops the run and its data-loader workers;
+  the toolkit cannot resume, so a cancelled or interrupted run starts over.
+  Working files live in `data/finetune/runs/<id>` (log, loss chart,
+  checkpoints) until you delete the run; published models stay.
+
 ## HTTP API
 
 Interactive docs are at `/api/docs`. All endpoints except `/api/config`,

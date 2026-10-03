@@ -3,6 +3,11 @@
 One GPU means one job at a time, so a single daemon thread drains a FIFO
 queue.  Model loading happens on that same thread (lazily on the first job,
 or eagerly at startup when ``PRELOAD_MODEL`` is set).
+
+The GPU is shared with the trainer service, one at a time.  While a training
+run is active the worker unloads the model as soon as no job is running,
+holds queued jobs, and publishes a heartbeat (``app_heartbeat`` in the kv
+table) saying whether it still holds the model; the trainer waits for it.
 """
 
 from __future__ import annotations
@@ -11,12 +16,15 @@ import logging
 import queue
 import threading
 import time
+from dataclasses import dataclass
+from pathlib import Path
 
 from app.audio import concat_with_silence, peak_normalize, write_wav
 from app.config import Settings
 from app.db import Database
 from app.engines.base import Engine, SynthesisParams
 from app.text import split_text
+from app.training import APP_HEARTBEAT_KEY
 
 log = logging.getLogger(__name__)
 
@@ -24,13 +32,26 @@ _LOAD = object()
 _STOP = object()
 
 
+@dataclass(frozen=True)
+class SetModel:
+    """Control message: switch the T3 checkpoint (applied on the worker thread)."""
+
+    t3_model: str
+    t3_path: Path | None
+
+
 class Worker:
-    def __init__(self, db: Database, engine: Engine, settings: Settings) -> None:
+    def __init__(self, db: Database, engine: Engine, settings: Settings, poll_seconds: float = 2.0) -> None:
         self.db = db
         self.engine = engine
         self.settings = settings
+        self.poll_seconds = poll_seconds
         self._queue: queue.Queue[object] = queue.Queue()
         self._thread: threading.Thread | None = None
+        self._stopping = threading.Event()
+        self._last_beat = 0.0
+        self.paused_for_training = False
+        self.model_error: str | None = None
         self._load_lock = threading.Lock()
         self.model_loading = False
         self.load_error: str | None = None
@@ -52,12 +73,16 @@ class Worker:
         self._thread.start()
 
     def stop(self, timeout: float = 5.0) -> None:
+        self._stopping.set()
         self._queue.put(_STOP)
         if self._thread is not None:
             self._thread.join(timeout=timeout)
 
     def submit(self, job_id: str) -> None:
         self._queue.put(job_id)
+
+    def request_model(self, t3_model: str, t3_path: Path | None) -> None:
+        self._queue.put(SetModel(t3_model, t3_path))
 
     @property
     def queue_size(self) -> int:
@@ -74,6 +99,8 @@ class Worker:
                 "current_job_id": self.current_job_id,
                 "completed": self.completed,
                 "failed": self.failed,
+                "paused_for_training": self.paused_for_training,
+                "model_error": self.model_error,
             }
         )
         return info
@@ -81,8 +108,17 @@ class Worker:
     # Internals -------------------------------------------------------------
     def _run(self) -> None:
         while True:
-            item = self._queue.get()
+            try:
+                item = self._queue.get(timeout=self.poll_seconds)
+            except queue.Empty:
+                self._housekeeping()
+                continue
             if item is _STOP:
+                break
+            if isinstance(item, SetModel):
+                self._apply_model(item)
+                continue
+            if not self._wait_while_training():
                 break
             if item is _LOAD:
                 self._ensure_loaded()
@@ -91,6 +127,37 @@ class Worker:
             if not job or job["status"] != "queued":
                 continue
             self._process(job)
+            self._housekeeping()
+
+    # GPU sharing with the trainer -----------------------------------------
+    def _housekeeping(self, force_beat: bool = False) -> None:
+        """Release the GPU for an active training run and publish the heartbeat."""
+        training = self.db.active_run() is not None
+        if training and self.engine.loaded and self.current_job_id is None:
+            log.info("Training run active: unloading the model to free the GPU")
+            self.engine.unload()
+        self.paused_for_training = training
+        now = time.time()
+        if force_beat or training or now - self._last_beat >= 5 * self.poll_seconds:
+            self.db.set_kv(APP_HEARTBEAT_KEY, {"t": now, "engine_loaded": self.engine.loaded})
+            self._last_beat = now
+
+    def _wait_while_training(self) -> bool:
+        """Hold queued work while a run owns the GPU; False if the worker is stopping."""
+        while self.db.active_run() is not None:
+            self._housekeeping()
+            if self._stopping.wait(self.poll_seconds):
+                return False
+        self.paused_for_training = False
+        return not self._stopping.is_set()
+
+    def _apply_model(self, request: SetModel) -> None:
+        try:
+            self.engine.set_t3(request.t3_model, request.t3_path)
+            self.model_error = None
+        except Exception as exc:  # noqa: BLE001 - surface any failure to the UI, keep the old model
+            log.exception("Could not switch the T3 checkpoint")
+            self.model_error = f"{type(exc).__name__}: {exc}"
 
     def _ensure_loaded(self) -> bool:
         if self.engine.loaded:

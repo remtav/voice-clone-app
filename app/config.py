@@ -117,6 +117,15 @@ class Settings:
         return path if path.is_absolute() else self.data_dir / path
 
     @property
+    def models_dir(self) -> Path:
+        """Fine-tuned T3 checkpoints the app can switch to (written by the trainer)."""
+        return self.data_dir / "models"
+
+    @property
+    def finetune_dir(self) -> Path:
+        return self.data_dir / "finetune"
+
+    @property
     def db_path(self) -> Path:
         return self.data_dir / "voiceclone.sqlite3"
 

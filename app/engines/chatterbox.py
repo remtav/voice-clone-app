@@ -18,6 +18,7 @@ Three variants are exposed via ``CHATTERBOX_MODEL``:
 
 from __future__ import annotations
 
+import gc
 import logging
 import os
 from pathlib import Path
@@ -102,12 +103,69 @@ class ChatterboxEngine(Engine):
         self._loaded = True
         log.info("Chatterbox loaded (%s, sr=%d)", self.model_id, self.sample_rate)
 
+    def unload(self) -> None:
+        if self.model is None:
+            self._loaded = False
+            return
+        self.model = None
+        self._loaded = False
+        gc.collect()
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
+        log.info("Chatterbox unloaded (GPU memory released)")
+
+    def set_t3(self, t3_model: str, t3_path: Path | None) -> None:
+        """Swap the T3 weights in place: the decoder and voice encoder stay loaded.
+
+        Keys and shapes are checked before anything is copied, so a bad file
+        leaves the current model untouched.
+        """
+        if not self.multilingual:
+            raise ValueError("Only the multilingual model has swappable T3 checkpoints")
+        if t3_path is not None and not t3_path.is_file():
+            raise FileNotFoundError(f"T3 checkpoint not found: {t3_path}")
+        if self._loaded and self.model is not None:
+            from safetensors.torch import load_file
+
+            state = load_file(str(t3_path if t3_path is not None else self._official_t3_file(t3_model)))
+            current = self.model.t3.state_dict()
+            if set(state) != set(current):
+                raise ValueError("T3 checkpoint does not match the model (different tensor names)")
+            wrong = [k for k in state if tuple(state[k].shape) != tuple(current[k].shape)]
+            if wrong:
+                raise ValueError(f"T3 checkpoint does not match the model (shape of {wrong[0]})")
+            self.model.t3.load_state_dict(state, strict=True)
+        self.t3_model, self.t3_path = t3_model, t3_path
+        if self._loaded:
+            self.model_id = self._describe()
+        log.info("T3 checkpoint set to %s", t3_path or t3_model)
+
+    @staticmethod
+    def _official_t3_file(name: str) -> Path:
+        from chatterbox.mtl_tts import REPO_ID
+        from huggingface_hub import hf_hub_download
+
+        files = {"v2": "t3_mtl23ls_v2.safetensors", "v3": "t3_mtl23ls_v3.safetensors"}
+        if name not in files:
+            raise ValueError(f"Unknown official T3 checkpoint '{name}'")
+        return Path(hf_hub_download(REPO_ID, files[name]))
+
+    def _describe(self) -> str:
+        if self.t3_path is not None:
+            return f"ResembleAI/chatterbox (multilingual, custom T3 {self.t3_path.name})"
+        return f"ResembleAI/chatterbox (multilingual {self.t3_model})"
+
     def _load_official_multilingual(self) -> None:
         from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
         try:
             self.model = ChatterboxMultilingualTTS.from_pretrained(device=self.device, t3_model=self.t3_model)
-            self.model_id = f"ResembleAI/chatterbox (multilingual {self.t3_model})"
+            self.model_id = self._describe()
         except TypeError:
             # Older chatterbox-tts releases (PyPI 0.1.7) predate the checkpoint selector.
             log.warning("Installed chatterbox-tts has no T3 checkpoint selector; using its default (v2)")
@@ -135,7 +193,7 @@ class ChatterboxEngine(Engine):
         self.model = ChatterboxMultilingualTTS.from_local(
             ckpt_dir, self.device, t3_model=str(self.t3_path.absolute())
         )
-        self.model_id = f"ResembleAI/chatterbox (multilingual, custom T3 {self.t3_path.name})"
+        self.model_id = self._describe()
 
     # ------------------------------------------------------------------
     def synthesize(self, text: str, reference_wav: Path, params: SynthesisParams) -> np.ndarray:

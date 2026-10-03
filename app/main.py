@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -22,7 +23,8 @@ from app.auth import Auth
 from app.config import Settings
 from app.db import Database, new_id
 from app.engines import create_engine
-from app.models import GenerateRequest, LoginRequest, VoiceUpdateRequest
+from app.models import ActiveModelRequest, GenerateRequest, LoginRequest, TrainingRunRequest, VoiceUpdateRequest
+from app.training import ACTIVE_MODEL_KEY, RECIPE_DEFAULTS, RUN_METRICS_NAME, TRAINER_HEARTBEAT_KEY, read_log_tail
 from app.worker import Worker
 
 log = logging.getLogger("voiceclone")
@@ -38,6 +40,18 @@ ALLOWED_UPLOAD_SUFFIXES = {
 def _slug(value: str, fallback: str = "voice") -> str:
     slug = re.sub(r"[^A-Za-z0-9]+", "-", value).strip("-").lower()
     return slug[:40] or fallback
+
+
+OFFICIAL_T3 = ("v3", "v2")
+MODEL_FILE_RE = re.compile(r"^[A-Za-z0-9_.-]+\.safetensors$")
+TRAINER_STALE_SECONDS = 45
+
+
+def _csv_rows(path: Path) -> int:
+    if not path.is_file():
+        return 0
+    with path.open(encoding="utf-8") as fh:
+        return max(0, sum(1 for line in fh if line.strip()) - 1)
 
 
 def _client_ip(request: Request) -> str:
@@ -63,8 +77,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     auth = Auth(settings.app_password, settings.secret_key, settings.session_hours)
     worker = Worker(db, engine, settings)
 
+    def model_path(name: str) -> Path | None:
+        """None for an official checkpoint; the file for a fine-tuned one (validated name)."""
+        if name in OFFICIAL_T3:
+            return None
+        if not MODEL_FILE_RE.match(name):
+            raise HTTPException(400, f"Invalid model name '{name}'")
+        path = settings.models_dir / name
+        if not path.is_file():
+            raise HTTPException(404, f"Model '{name}' not found in data/models")
+        return path
+
+    def restore_active_model() -> None:
+        saved = (db.get_kv(ACTIVE_MODEL_KEY) or {}).get("model")
+        if not saved:
+            return
+        try:
+            engine.set_t3(saved, model_path(saved))
+            log.info("Active T3 checkpoint restored: %s", saved)
+        except (HTTPException, NotImplementedError, ValueError, FileNotFoundError) as exc:
+            detail = exc.detail if isinstance(exc, HTTPException) else exc
+            log.warning("Ignoring saved active model %s: %s", saved, detail)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI):
+        restore_active_model()
         if not auth.enabled:
             log.warning("APP_PASSWORD is not set: the API is unauthenticated. Do NOT expose this to the internet.")
         log.info("Engine: %s (%s), data dir: %s", engine.name, engine.variant, settings.data_dir.resolve())
@@ -152,7 +189,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/status")
     def status():
-        return worker.status()
+        data = worker.status()
+        run = db.active_run()
+        data["training"] = (
+            {k: run[k] for k in ("id", "name", "status", "stage", "progress", "eta_seconds")} if run else None
+        )
+        return data
 
     # Voices ----------------------------------------------------------------
     @app.get("/api/voices")
@@ -257,6 +299,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Generation --------------------------------------------------------------
     @app.post("/api/generate", status_code=202)
     def generate(body: GenerateRequest):
+        run = db.active_run()
+        if run:
+            raise HTTPException(409, f"Training run '{run['name']}' is using the GPU; generation resumes when it "
+                                     "finishes (or cancel it in Fine-tuning).")
         voice = db.get_voice(body.voice_id)
         if not voice:
             raise HTTPException(404, "Voice not found")
@@ -319,6 +365,125 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             db.delete_job(job_id)
             if job.get("output_filename"):
                 (settings.outputs_dir / job["output_filename"]).unlink(missing_ok=True)
+        return Response(status_code=204)
+
+    # Models ------------------------------------------------------------------
+    def list_models() -> dict:
+        custom = []
+        if settings.models_dir.is_dir():
+            for path in sorted(settings.models_dir.glob("*.safetensors"), key=lambda p: -p.stat().st_mtime):
+                stat = path.stat()
+                custom.append({"name": path.name, "size_bytes": stat.st_size, "created_at": stat.st_mtime})
+        info = engine.info()
+        return {"active": info.get("t3_model"), "model_id": info.get("model_id"), "official": list(OFFICIAL_T3),
+                "custom": custom, "switchable": engine.multilingual, "error": worker.model_error}
+
+    @app.get("/api/models")
+    def get_models():
+        return list_models()
+
+    @app.post("/api/models/active")
+    def set_active_model(body: ActiveModelRequest):
+        if not engine.multilingual:
+            raise HTTPException(400, "Only the multilingual engine can switch T3 checkpoints")
+        path = model_path(body.model)
+        db.set_kv(ACTIVE_MODEL_KEY, {"model": body.model})
+        worker.request_model(body.model, path)
+        return {"model": body.model, "pending": True}
+
+    @app.delete("/api/models/{name}", status_code=204)
+    def delete_model(name: str):
+        path = model_path(name)
+        if path is None:
+            raise HTTPException(400, "Official checkpoints cannot be deleted")
+        if engine.info().get("t3_model") == name or (db.get_kv(ACTIVE_MODEL_KEY) or {}).get("model") == name:
+            raise HTTPException(409, "This model is active; switch to another one first")
+        path.unlink(missing_ok=True)
+        return Response(status_code=204)
+
+    # Training ----------------------------------------------------------------
+    def run_dir(run_id: str) -> Path:
+        if not re.fullmatch(r"[0-9a-f]{12}", run_id):
+            raise HTTPException(404, "Run not found")
+        return settings.finetune_dir / "runs" / run_id
+
+    def get_run_or_404(run_id: str) -> dict:
+        run = db.get_run(run_id) if re.fullmatch(r"[0-9a-f]{12}", run_id) else None
+        if not run:
+            raise HTTPException(404, "Run not found")
+        run["has_metrics"] = (run_dir(run_id) / RUN_METRICS_NAME).is_file()
+        return run
+
+    @app.get("/api/training")
+    def training_overview():
+        beat = db.get_kv(TRAINER_HEARTBEAT_KEY) or {}
+        age = time.time() - float(beat.get("t", 0)) if beat else None
+        own = settings.finetune_dir / "me" / "audio_data"
+        qc = settings.finetune_dir / "qc" / "audio_data"
+        runs = db.list_runs(20)
+        for run in runs:
+            run["has_metrics"] = (run_dir(run["id"]) / RUN_METRICS_NAME).is_file()
+        return {
+            "trainer": {"online": age is not None and age < TRAINER_STALE_SECONDS, "last_seen_seconds": age,
+                        "gpu": beat.get("gpu"), "busy": beat.get("busy"), "allow_cpu": beat.get("allow_cpu")},
+            "active": db.active_run(),
+            "runs": runs,
+            "defaults": RECIPE_DEFAULTS,
+            "datasets": {
+                "qc": {"ready": (qc / "metadata.csv").is_file(), "clips": _csv_rows(qc / "metadata.csv")},
+                "own": {"ready": (own / "metadata.csv").is_file(), "clips": _csv_rows(own / "metadata.csv")},
+            },
+            "models": list_models()["custom"],
+        }
+
+    @app.post("/api/training/runs", status_code=201)
+    def create_run(body: TrainingRunRequest):
+        active = db.active_run()
+        if active:
+            raise HTTPException(409, f"Run '{active['name']}' is still {active['status']}; one run at a time")
+        params = {**RECIPE_DEFAULTS[body.recipe],
+                  **body.model_dump(exclude={"recipe", "name", "base_model"}, exclude_none=True)}
+        if body.recipe == "personal":
+            if not body.base_model:
+                raise HTTPException(400, "Pick the fine-tuned model to start from (base_model)")
+            if model_path(body.base_model) is None:
+                raise HTTPException(400, "Start from a fine-tuned Quebec model, not an official checkpoint")
+            if not (settings.finetune_dir / "me" / "audio_data" / "metadata.csv").is_file():
+                raise HTTPException(400, "No recordings of your voice yet: run scripts.finetune.segment_recording "
+                                         "into data/finetune/me/audio_data first (see the README)")
+            params["base_model"] = body.base_model
+        name = body.name.strip() or ("Quebec accent" if body.recipe == "fr_ca" else "My voice")
+        params["output_name"] = f"t3_{_slug(name, 'model').replace('-', '_')}_{new_id()[:6]}"
+        return db.create_run(name, body.recipe, params)
+
+    @app.get("/api/training/runs/{run_id}")
+    def get_run(run_id: str):
+        return get_run_or_404(run_id)
+
+    @app.get("/api/training/runs/{run_id}/log")
+    def get_run_log(run_id: str, lines: int = Query(200, ge=1, le=2000)):
+        get_run_or_404(run_id)
+        return {"lines": read_log_tail(run_dir(run_id), lines)}
+
+    @app.get("/api/training/runs/{run_id}/metrics.png")
+    def get_run_metrics(run_id: str):
+        get_run_or_404(run_id)
+        path = run_dir(run_id) / RUN_METRICS_NAME
+        if not path.is_file():
+            raise HTTPException(404, "No training chart yet")
+        return FileResponse(path, media_type="image/png", headers={"Cache-Control": "no-cache"})
+
+    @app.delete("/api/training/runs/{run_id}", status_code=204)
+    def delete_run(run_id: str):
+        """Cancel an active run, or delete a finished one and its working files (not its model)."""
+        run = get_run_or_404(run_id)
+        if run["status"] == "queued" and db.claim_run(run_id, "queued", "cancelled"):
+            db.update_run(run_id, message="Cancelled before it started", finished_at=time.time())
+        elif run["status"] in ("waiting_gpu", "running"):
+            db.claim_run(run_id, run["status"], "cancelling")
+        elif run["status"] in ("done", "failed", "cancelled"):
+            db.delete_run(run_id)
+            shutil.rmtree(run_dir(run_id), ignore_errors=True)
         return Response(status_code=204)
 
     # Front-end ---------------------------------------------------------------
