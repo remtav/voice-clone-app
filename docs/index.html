@@ -13,7 +13,7 @@
   <div class="demo-banner" id="demo-banner">
     <span class="tag">Demo</span>
     <strong>Static UI preview.</strong>
-    <span class="muted">Nothing is sent to a server — voices and audio here are fake. The real app runs on your own GPU.</span>
+    <span class="muted">Nothing is sent to a server — voices, audio and training runs here are simulated. The real app runs on your own GPU.</span>
     <span class="spacer"></span>
     <a href="https://github.com/remtav/voice-clone-app" target="_blank" rel="noopener">View source ↗</a>
     <button class="close" id="demo-banner-close" type="button" title="Dismiss">✕</button>
@@ -126,6 +126,7 @@
             </details>
 
             <button class="btn btn-primary btn-lg" id="gen-btn" type="submit">Generate</button>
+            <p id="gen-training-note" class="gen-note hidden" role="status"></p>
           </form>
         </section>
 
@@ -137,12 +138,65 @@
           <ul id="job-list" class="job-list"></ul>
           <p id="job-empty" class="muted hidden">Nothing generated yet.</p>
         </section>
+
+        <section class="card" id="training-card">
+          <div class="card-head">
+            <h2>Fine-tuning</h2>
+            <span id="trainer-status" class="trainer-status small">Checking the trainer…</span>
+          </div>
+
+          <div class="model-row">
+            <label class="field">Model used for generation
+              <select id="model-select"></select>
+            </label>
+            <button id="model-apply" class="btn" type="button" disabled>Use this model</button>
+            <button id="model-delete" class="btn btn-ghost small hidden" type="button">Delete</button>
+          </div>
+          <p id="model-error" class="job-error hidden"></p>
+
+          <details id="training-new" class="advanced">
+            <summary>New training run</summary>
+            <form id="training-form" class="stack">
+              <div class="row">
+                <label class="field">Recipe
+                  <select id="tr-recipe">
+                    <option value="fr_ca">Quebec accent (public corpus, from v3)</option>
+                    <option value="personal">My voice (my recordings, from a Quebec model)</option>
+                  </select>
+                </label>
+                <label class="field">Name
+                  <input type="text" id="tr-name" maxlength="60" placeholder="Quebec accent">
+                </label>
+              </div>
+              <label class="field personal-only hidden">Start from
+                <select id="tr-base"></select>
+              </label>
+              <div class="row">
+                <label class="field">Epochs <input type="number" id="tr-epochs" min="1" max="20" step="1"></label>
+                <label class="field">LoRA rank
+                  <select id="tr-rank"><option value="">default</option><option>8</option><option>16</option>
+                    <option>32</option><option>64</option></select>
+                </label>
+              </div>
+              <label class="field">Learning rate <input type="number" id="tr-lr" min="0.000001" max="0.001" step="any"></label>
+              <p id="tr-hint" class="muted small"></p>
+              <button id="tr-start" class="btn btn-primary" type="submit">Start training</button>
+              <p class="muted small">Training takes the GPU: generation pauses until the run ends (3–6 h on a
+                24 GB card for the Quebec recipe). The result appears in the model list once validated.</p>
+            </form>
+          </details>
+
+          <ul id="run-list" class="job-list"></ul>
+          <p id="run-empty" class="muted">No training run yet.</p>
+        </section>
       </section>
     </div>
   </main>
 
   <div id="toast" class="toast hidden" role="status"></div>
   <script src="demo.js"></script>
+  <script src="training-mock.js"></script>
+  <script src="training.js"></script>
   <script src="onboarding.js"></script>
 </body>
 </html>
