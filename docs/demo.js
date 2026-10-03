@@ -262,6 +262,10 @@
 
   function generate(event) {
     event.preventDefault();
+    if (window.demoTrainingActive && window.demoTrainingActive()) {
+      // Same answer as the real API (HTTP 409): the GPU belongs to the training run.
+      return toast("A training run is using the GPU; generation resumes when it finishes (or cancel it in Fine-tuning).", "error");
+    }
     const text = $("#gen-text").value.trim();
     if (!text) return toast("Enter some text first", "error");
     const voice = state.voices.find((v) => v.id === $("#gen-voice").value);
