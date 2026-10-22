@@ -338,6 +338,7 @@
     }
     form.append("name", $("#voice-name").value.trim());
     form.append("language", $("#voice-language").value || "");
+    form.append("transcript", $("#voice-transcript").value.trim());
 
     const button = $("#voice-save");
     button.disabled = true;
@@ -346,6 +347,7 @@
       const voice = await api("/api/voices", { method: "POST", body: form });
       toast(`Voice "${voice.name}" saved (${fmtSeconds(voice.duration)})`, "ok");
       $("#voice-name").value = "";
+      $("#voice-transcript").value = "";
       $("#voice-file").value = "";
       setRecordedBlob(null);
       $("#record-timer").textContent = "0:00";

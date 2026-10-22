@@ -63,6 +63,11 @@
             <label class="field">Language of the recording
               <select id="voice-language"></select>
             </label>
+            <label class="field">Transcript <span class="muted small">(optional: the exact words of the clip;
+              Qwen3-TTS uses it to copy accent and intonation)</span>
+              <textarea id="voice-transcript" rows="3" maxlength="2000"
+                        placeholder="What is said in the recording, word for word"></textarea>
+            </label>
             <button class="btn btn-primary" id="voice-save" type="submit" disabled>Save voice</button>
           </form>
         </section>

@@ -16,6 +16,10 @@ def create_engine(settings: Settings) -> Engine:
             t3_model=settings.chatterbox_t3_model,
             t3_path=settings.chatterbox_t3_path,
         )
+    if settings.engine == "qwen":
+        from app.engines.qwen import QwenEngine
+
+        return QwenEngine(model=settings.qwen_model, device=settings.device)
     if settings.engine == "vc":
         from app.engines.vc import VoiceConversionEngine
 
@@ -24,7 +28,7 @@ def create_engine(settings: Settings) -> Engine:
         from app.engines.fake import FakeEngine
 
         return FakeEngine()
-    raise ValueError(f"Unknown TTS_ENGINE '{settings.engine}' (expected 'chatterbox', 'vc' or 'fake')")
+    raise ValueError(f"Unknown TTS_ENGINE '{settings.engine}' (expected 'chatterbox', 'qwen', 'vc' or 'fake')")
 
 
 __all__ = ["Engine", "SynthesisParams", "create_engine"]

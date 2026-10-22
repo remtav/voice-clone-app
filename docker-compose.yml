@@ -3,6 +3,9 @@ services:
     build:
       context: .
       target: app
+      args:
+        # requirements-engine-qwen.txt for TTS_ENGINE=qwen (see README).
+        ENGINE_REQUIREMENTS: ${ENGINE_REQUIREMENTS:-requirements-engine.txt}
     image: voice-clone-app:latest
     container_name: voice-clone-app
     restart: unless-stopped

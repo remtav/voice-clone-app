@@ -32,9 +32,46 @@ Three variants are selectable with `CHATTERBOX_MODEL`: `multilingual`
 (default, v3, 23 languages), `english` (the original model) and `turbo`
 (English, fastest, supports `[laugh]`/`[chuckle]` tags).
 
-The engine sits behind a small interface (`app/engines/base.py`), so swapping
-in another model later (Qwen3-TTS, Zonos, …) is a one-file change. A `fake`
-engine that emits tones lets you run the UI and tests without a GPU.
+The engine sits behind a small interface (`app/engines/base.py`). A second
+engine, Qwen3-TTS, is available (below). A `fake` engine that emits tones lets
+you run the UI and tests without a GPU.
+
+## Second engine: Qwen3-TTS
+
+[Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base) (Apache 2.0,
+code and weights) clones a voice from a clip **and its transcript**. With the
+transcript, it continues the reference as if the same person kept talking, so
+it copies the accent and the intonation, not only the timbre. In a Quebec
+French test (one speaker, judged by ear) the speaker's accent came through.
+
+* **Give each voice its transcript** (the *Transcript* field, or `transcript`
+  in the API): the exact words of the clip. Without one, only the timbre is
+  cloned.
+* **Longer, livelier references help**: 30 to 60 seconds with questions,
+  emphasis and pauses gave less flat intonation than 25 seconds in that test. Set
+  `MAX_REFERENCE_SECONDS=60`. A clip longer than the limit is refused when it
+  has a transcript, since cutting it would make the transcript wrong.
+* **Settings**: `temperature` (0.9 is the model's default) and `seed` apply;
+  `exaggeration` and `cfg_weight` are Chatterbox-only and are ignored.
+* **Languages**: Chinese, English, French, German, Italian, Japanese, Korean,
+  Portuguese, Russian, Spanish.
+* **Fine-tuning** from the web UI trains Chatterbox checkpoints and does not
+  apply to this engine.
+
+It needs `transformers==4.57.3` while Chatterbox needs 5.x, so it gets its own
+image:
+
+```bash
+# .env
+TTS_ENGINE=qwen
+ENGINE_REQUIREMENTS=requirements-engine-qwen.txt
+MAX_REFERENCE_SECONDS=60
+
+docker compose build app && docker compose up -d app
+```
+
+The model has 1.7B parameters, loaded in bfloat16 on GPU. Switching back: restore the three lines and
+rebuild. Voices are shared; transcripts are simply ignored by Chatterbox.
 
 ## Architecture
 
@@ -139,8 +176,10 @@ All settings are environment variables (see `.env.example`).
 | `SECRET_KEY` | derived | Signs session cookies; set to a random string to make sessions independent of the password. |
 | `SESSION_HOURS` | `168` | Session lifetime. |
 | `TUNNEL_TOKEN` | | Cloudflare tunnel token (compose only). |
-| `TTS_ENGINE` | `chatterbox` | `chatterbox` or `fake`. |
+| `TTS_ENGINE` | `chatterbox` | `chatterbox`, `qwen` (see [Second engine](#second-engine-qwen3-tts)), `vc` or `fake`. |
 | `CHATTERBOX_MODEL` | `multilingual` | `multilingual`, `english` or `turbo`. |
+| `ENGINE_REQUIREMENTS` | `requirements-engine.txt` | Build-time: `requirements-engine-qwen.txt` for the Qwen3-TTS image. |
+| `QWEN_MODEL` | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | Qwen3-TTS Base checkpoint (Hugging Face id or local directory). |
 | `CHATTERBOX_T3_MODEL` | `v3` | Multilingual T3 checkpoint: `v2`, `v3`, or a fine-tuned `.safetensors` file (absolute, or relative to `DATA_DIR`). See [Regional accents](#regional-accents). |
 | `DEVICE` | `auto` | `auto`, `cuda` or `cpu` (CPU works but is very slow). |
 | `PRELOAD_MODEL` | `1` | Load the model at startup rather than on first use. |
@@ -239,8 +278,8 @@ Interactive docs are at `/api/docs`. All endpoints except `/api/config`,
 | `GET` | `/api/config` | Engine info, language list, limits, auth state |
 | `GET` | `/api/status` | Model/GPU/queue status |
 | `GET` | `/api/voices` | List voices |
-| `POST` | `/api/voices` (multipart `file`, `name`, `language`) | Add a voice |
-| `PATCH` | `/api/voices/{id}` `{name?, language?}` | Rename / relabel |
+| `POST` | `/api/voices` (multipart `file`, `name`, `language`, `transcript`) | Add a voice |
+| `PATCH` | `/api/voices/{id}` `{name?, language?, transcript?}` | Rename / relabel / set the transcript |
 | `GET` | `/api/voices/{id}/audio` | Reference WAV |
 | `DELETE` | `/api/voices/{id}` | Remove a voice |
 | `POST` | `/api/generate` `{voice_id, text, language?, exaggeration?, cfg_weight?, temperature?, seed?}` | Queue a job (202) |
