@@ -58,6 +58,14 @@ French test (one speaker, judged by ear) the speaker's accent came through.
 * **Fine-tuning** from the web UI trains Chatterbox checkpoints and does not
   apply to this engine.
 
+**Step-by-step guide (in French), with what worked and what did not:**
+[`docs/voix-quebecoise-qwen.md`](docs/voix-quebecoise-qwen.md). Prepare the reference
+clip first: the app does not trim silence or set the level on upload.
+
+```bash
+python -m scripts.prepare_reference my-recording.m4a voice/reference.wav --transcribe
+```
+
 It needs `transformers==4.57.3` while Chatterbox needs 5.x, so it gets its own
 image:
 
