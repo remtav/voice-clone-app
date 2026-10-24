@@ -50,6 +50,13 @@ class Settings:
     device: str = "auto"  # "auto", "cuda" or "cpu"
     preload_model: bool = True
 
+    # Speech-to-text for reference transcripts: "faster-whisper", "fake" or "none".
+    stt_engine: str = "faster-whisper"
+    # Whisper checkpoint (CTranslate2 format: a faster-whisper size name, Hugging Face id or directory).
+    stt_model: str = "large-v3-turbo"
+    stt_device: str = "auto"  # "auto", "cuda" or "cpu"
+    stt_compute_type: str = "auto"  # CTranslate2 type: "auto", "float16", "int8", ...
+
     # Authentication (empty password disables auth: local use only!)
     app_password: str = ""
     secret_key: str = ""
@@ -66,6 +73,7 @@ class Settings:
     def __post_init__(self) -> None:
         self.data_dir = Path(self.data_dir)
         self.engine = self.engine.lower().strip()
+        self.stt_engine = self.stt_engine.lower().strip()
         self.chatterbox_model = self.chatterbox_model.lower().strip()
         # Not lowercased: it may be a file path.
         self.chatterbox_t3_model = self.chatterbox_t3_model.strip() or "v3"
@@ -86,6 +94,10 @@ class Settings:
             qwen_model=os.environ.get("QWEN_MODEL", "Qwen/Qwen3-TTS-12Hz-1.7B-Base"),
             device=os.environ.get("DEVICE", "auto"),
             preload_model=_bool("PRELOAD_MODEL", True),
+            stt_engine=os.environ.get("STT_ENGINE", "faster-whisper"),
+            stt_model=os.environ.get("STT_MODEL", "") or "large-v3-turbo",
+            stt_device=os.environ.get("STT_DEVICE", "") or "auto",
+            stt_compute_type=os.environ.get("STT_COMPUTE_TYPE", "") or "auto",
             app_password=os.environ.get("APP_PASSWORD", ""),
             secret_key=os.environ.get("SECRET_KEY", ""),
             session_hours=_int("SESSION_HOURS", 24 * 7),

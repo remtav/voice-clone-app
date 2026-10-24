@@ -4,3 +4,5 @@
 # conflicts with Chatterbox (transformers 5.x): the two engines live in
 # separate images.  torch/torchaudio 2.6.0 come from the base image.
 qwen-tts==0.1.1
+# Speech-to-text for reference transcripts (STT_ENGINE=faster-whisper, MIT).
+faster-whisper>=1.1,<2

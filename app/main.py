@@ -31,6 +31,7 @@ from app.models import (
     TrainingRunRequest,
     VoiceUpdateRequest,
 )
+from app.stt import create_transcriber
 from app.training import ACTIVE_MODEL_KEY, RECIPE_DEFAULTS, RUN_METRICS_NAME, TRAINER_HEARTBEAT_KEY, read_log_tail
 from app.worker import Worker
 
@@ -81,8 +82,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     db = Database(settings.db_path)
     engine = create_engine(settings)
+    transcriber = create_transcriber(settings)
     auth = Auth(settings.app_password, settings.secret_key, settings.session_hours)
-    worker = Worker(db, engine, settings)
+    worker = Worker(db, engine, settings, transcriber=transcriber)
 
     def model_path(name: str) -> Path | None:
         """None for an official checkpoint; the file for a fine-tuned one (validated name)."""
@@ -128,6 +130,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.db = db
     app.state.engine = engine
     app.state.worker = worker
+    app.state.transcriber = transcriber
     app.state.auth = auth
 
     # Auth ------------------------------------------------------------------
@@ -181,6 +184,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "auth_required": auth.enabled,
             "authenticated": is_authenticated(request),
             "engine": engine.info(),
+            "stt": transcriber.info() if transcriber is not None else None,
             "limits": {
                 "max_text_chars": settings.max_text_chars,
                 "max_chunk_chars": settings.max_chunk_chars,
@@ -204,36 +208,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return data
 
     # Voices ----------------------------------------------------------------
-    @app.get("/api/voices")
-    def list_voices():
-        return db.list_voices()
-
-    @app.post("/api/voices", status_code=201)
-    async def create_voice(
-        file: UploadFile = File(...),
-        name: str = Form(""),
-        language: str = Form(""),
-        transcript: str = Form(""),
-    ):
-        original = file.filename or "recording"
-        suffix = Path(original).suffix.lower()
+    def check_upload_type(file: UploadFile) -> str:
+        """The upload's file suffix; 400 unless it looks like audio or video."""
+        suffix = Path(file.filename or "recording").suffix.lower()
         content_type = (file.content_type or "").lower()
         if suffix not in ALLOWED_UPLOAD_SUFFIXES and not content_type.startswith(("audio/", "video/")):
             raise HTTPException(400, f"Unsupported file type '{suffix or content_type or 'unknown'}'")
-        if not suffix:
-            suffix = ".webm" if "webm" in content_type else ".bin"
+        return suffix or (".webm" if "webm" in content_type else ".bin")
 
-        clean_name = name.strip()[:120] or Path(original).stem[:120] or "Voice"
-        lang = language.strip().lower() or None
-        if lang and engine.multilingual and lang not in engine.languages:
-            raise HTTPException(400, f"Unsupported language '{lang}'")
-        clean_transcript = " ".join(transcript.split())
-        if len(clean_transcript) > MAX_TRANSCRIPT_CHARS:
-            raise HTTPException(400, f"Transcript longer than {MAX_TRANSCRIPT_CHARS} characters")
+    async def receive_reference(file: UploadFile, suffix: str, dst: Path) -> float:
+        """Stream an upload to disk and convert it to the reference WAV ``dst``; returns its duration.
 
-        voice_id = new_id()
-        tmp_path = settings.uploads_dir / f"{voice_id}{suffix}"
-        dst = settings.voices_dir / f"{voice_id}.wav"
+        The clip is cut at ``max_reference_seconds``, exactly as a saved voice is.
+        """
+        tmp_path = settings.uploads_dir / f"{new_id()}{suffix}"
         limit = settings.max_upload_mb * 1024 * 1024
         written = 0
         try:
@@ -257,17 +245,76 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if seconds < settings.min_reference_seconds:
                 raise HTTPException(400, f"Reference clip is too short ({seconds:.1f}s); record at least "
                                          f"{settings.min_reference_seconds:g}s, ideally 5-15s of clean speech.")
-            if clean_transcript and seconds >= settings.max_reference_seconds - 0.05:
-                # The clip was cut, so the transcript no longer matches it: a mismatch makes the
-                # engine read the wrong words aloud.
-                raise HTTPException(400, f"The clip is longer than {settings.max_reference_seconds}s and was cut, "
-                                         "so the transcript would not match. Shorten the clip or raise "
-                                         "MAX_REFERENCE_SECONDS.")
+            return seconds
         except Exception:
             dst.unlink(missing_ok=True)
             raise
         finally:
             tmp_path.unlink(missing_ok=True)
+
+    def require_stt() -> None:
+        if transcriber is None or not transcriber.available:
+            raise HTTPException(503, "Speech-to-text is not available (set STT_ENGINE and install faster-whisper)")
+
+    async def run_stt(wav: Path, language: str | None) -> dict:
+        require_stt()
+        if db.active_run() is not None:
+            raise HTTPException(409, "A training run is using the GPU; transcribe after it finishes")
+        lang = (language or "").strip().lower() or None
+        started = time.time()
+        try:
+            result = await run_in_threadpool(transcriber.transcribe, wav, lang)
+        except Exception as exc:  # noqa: BLE001 - report any model failure to the UI
+            log.exception("Transcription failed")
+            raise HTTPException(500, f"Transcription failed: {type(exc).__name__}: {exc}") from exc
+        log.info("Transcribed %s in %.1fs (%d characters)", wav.name, time.time() - started, len(result.text))
+        return {"text": result.text[:MAX_TRANSCRIPT_CHARS], "language": result.language}
+
+    @app.post("/api/transcribe")
+    async def transcribe(file: UploadFile = File(...), language: str = Form("")):
+        """Draft transcript of a clip before it is saved as a voice (the user reviews it)."""
+        require_stt()
+        suffix = check_upload_type(file)
+        wav = settings.uploads_dir / f"stt-{new_id()}.wav"
+        try:
+            seconds = await receive_reference(file, suffix, wav)
+            result = await run_stt(wav, language)
+        finally:
+            wav.unlink(missing_ok=True)
+        # A cut clip cannot be saved with a transcript; say so before the user edits the text.
+        result.update(duration=seconds, truncated=seconds >= settings.max_reference_seconds - 0.05)
+        return result
+
+    @app.get("/api/voices")
+    def list_voices():
+        return db.list_voices()
+
+    @app.post("/api/voices", status_code=201)
+    async def create_voice(
+        file: UploadFile = File(...),
+        name: str = Form(""),
+        language: str = Form(""),
+        transcript: str = Form(""),
+    ):
+        suffix = check_upload_type(file)
+        clean_name = name.strip()[:120] or Path(file.filename or "recording").stem[:120] or "Voice"
+        lang = language.strip().lower() or None
+        if lang and engine.multilingual and lang not in engine.languages:
+            raise HTTPException(400, f"Unsupported language '{lang}'")
+        clean_transcript = " ".join(transcript.split())
+        if len(clean_transcript) > MAX_TRANSCRIPT_CHARS:
+            raise HTTPException(400, f"Transcript longer than {MAX_TRANSCRIPT_CHARS} characters")
+
+        voice_id = new_id()
+        dst = settings.voices_dir / f"{voice_id}.wav"
+        seconds = await receive_reference(file, suffix, dst)
+        if clean_transcript and seconds >= settings.max_reference_seconds - 0.05:
+            # The clip was cut, so the transcript no longer matches it: a mismatch makes the
+            # engine read the wrong words aloud.
+            dst.unlink(missing_ok=True)
+            raise HTTPException(400, f"The clip is longer than {settings.max_reference_seconds}s and was cut, "
+                                     "so the transcript would not match. Shorten the clip or raise "
+                                     "MAX_REFERENCE_SECONDS.")
 
         voice = db.create_voice(clean_name, lang, dst.name, seconds, voice_id=voice_id,
                                 transcript=clean_transcript or None)
@@ -296,6 +343,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if body.transcript is not None:
             fields["transcript"] = " ".join(body.transcript.split()) or None
         return db.update_voice(voice_id, **fields)
+
+    @app.post("/api/voices/{voice_id}/transcribe")
+    async def transcribe_voice(voice_id: str):
+        """Transcribe a saved voice's clip and store the result as its transcript."""
+        voice = db.get_voice(voice_id)
+        if not voice:
+            raise HTTPException(404, "Voice not found")
+        path = settings.voices_dir / voice["filename"]
+        if not path.exists():
+            raise HTTPException(404, "Reference audio missing")
+        result = await run_stt(path, voice.get("language"))
+        return db.update_voice(voice_id, transcript=result["text"] or None)
 
     @app.get("/api/voices/{voice_id}/audio")
     def voice_audio(voice_id: str):

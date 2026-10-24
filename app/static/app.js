@@ -16,6 +16,9 @@
     recordTimer: null,
     pollTimer: null,
     statusTimer: null,
+    transcribing: false,
+    transcribeRun: 0, // id of the latest transcription, to drop stale answers
+    autoTranscript: null, // the last speech-to-text draft put in the transcript field
   };
 
   // ---------------------------------------------------------------- utils
@@ -100,6 +103,7 @@
     const limits = state.config.limits;
     $("#char-max").textContent = limits.max_text_chars;
     $("#max-ref-seconds").textContent = limits.max_reference_seconds;
+    $("#transcribe-row").classList.toggle("hidden", !state.config.stt?.available);
     updateCharCount();
 
     await Promise.all([loadVoices(), loadJobs()]);
@@ -271,12 +275,65 @@
       preview.classList.add("hidden");
     }
     updateSaveButton();
+    if (blob) transcribeClip(true);
+  }
+
+  // The clip of the active tab, as [blob, filename], or null.
+  function currentClip() {
+    const tab = document.querySelector(".tab.active")?.dataset.tab;
+    if (tab === "record") {
+      if (!state.recordedBlob) return null;
+      const type = state.recordedBlob.type || "";
+      const ext = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : "webm";
+      return [state.recordedBlob, `recording.${ext}`];
+    }
+    const file = $("#voice-file").files?.[0];
+    return file ? [file, file.name] : null;
   }
 
   function updateSaveButton() {
-    const tab = document.querySelector(".tab.active")?.dataset.tab;
-    const hasInput = tab === "record" ? !!state.recordedBlob : ($("#voice-file").files?.length ?? 0) > 0;
+    const hasInput = !!currentClip();
     $("#voice-save").disabled = !hasInput;
+    $("#transcribe-btn").disabled = !hasInput || state.transcribing;
+  }
+
+  // Speech-to-text draft of the clip.  Automatic runs only fill an empty field (or replace an
+  // earlier automatic draft), so text the user typed or corrected is never overwritten.
+  async function transcribeClip(auto = false) {
+    if (!state.config?.stt?.available) return;
+    const clip = currentClip();
+    if (!clip) return;
+    const box = $("#voice-transcript");
+    if (auto && box.value.trim() && box.value !== state.autoTranscript) return;
+    const run = ++state.transcribeRun;
+    const status = $("#transcribe-status");
+    state.transcribing = true;
+    updateSaveButton();
+    status.textContent = "Transcribing… (the first run downloads the speech-to-text model)";
+    const form = new FormData();
+    form.append("file", clip[0], clip[1]);
+    form.append("language", $("#voice-language").value || "");
+    try {
+      const result = await api("/api/transcribe", { method: "POST", body: form });
+      if (run !== state.transcribeRun) return; // a newer clip replaced this one
+      if (auto && box.value.trim() && box.value !== state.autoTranscript) {
+        status.textContent = "";
+        return; // the user started typing meanwhile
+      }
+      box.value = result.text;
+      state.autoTranscript = result.text;
+      status.textContent = result.truncated
+        ? `The clip is longer than ${state.config.limits.max_reference_seconds}s and will be cut: shorten it, `
+          + "or the transcript will be refused."
+        : result.text ? "Check the transcript word for word against the recording." : "No speech found.";
+    } catch (err) {
+      if (run === state.transcribeRun) status.textContent = `Transcription failed: ${err.message}`;
+    } finally {
+      if (run === state.transcribeRun) {
+        state.transcribing = false;
+        updateSaveButton();
+      }
+    }
   }
 
   async function toggleRecording() {
@@ -325,17 +382,10 @@
   async function saveVoice(event) {
     event.preventDefault();
     const tab = document.querySelector(".tab.active")?.dataset.tab;
+    const clip = currentClip();
+    if (!clip) return toast(tab === "record" ? "Record something first" : "Choose a file first");
     const form = new FormData();
-    if (tab === "record") {
-      if (!state.recordedBlob) return toast("Record something first");
-      const type = state.recordedBlob.type || "";
-      const ext = type.includes("mp4") ? "m4a" : type.includes("ogg") ? "ogg" : "webm";
-      form.append("file", state.recordedBlob, `recording.${ext}`);
-    } else {
-      const file = $("#voice-file").files?.[0];
-      if (!file) return toast("Choose a file first");
-      form.append("file", file, file.name);
-    }
+    form.append("file", clip[0], clip[1]);
     form.append("name", $("#voice-name").value.trim());
     form.append("language", $("#voice-language").value || "");
     form.append("transcript", $("#voice-transcript").value.trim());
@@ -348,6 +398,8 @@
       toast(`Voice "${voice.name}" saved (${fmtSeconds(voice.duration)})`, "ok");
       $("#voice-name").value = "";
       $("#voice-transcript").value = "";
+      $("#transcribe-status").textContent = "";
+      state.autoTranscript = null;
       $("#voice-file").value = "";
       setRecordedBlob(null);
       $("#record-timer").textContent = "0:00";
@@ -637,7 +689,11 @@
     $("#logout-btn").addEventListener("click", logout);
     $("#record-btn").addEventListener("click", toggleRecording);
     $("#voice-form").addEventListener("submit", saveVoice);
-    $("#voice-file").addEventListener("change", updateSaveButton);
+    $("#voice-file").addEventListener("change", () => {
+      updateSaveButton();
+      transcribeClip(true);
+    });
+    $("#transcribe-btn").addEventListener("click", () => transcribeClip(false));
     $("#generate-form").addEventListener("submit", generate);
     $("#gen-text").addEventListener("input", updateCharCount);
     $("#gen-voice").addEventListener("change", (e) => selectVoice(e.target.value));

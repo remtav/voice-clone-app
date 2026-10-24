@@ -3,3 +3,5 @@
 # predates v3, so we install from GitHub.  It pins torch==2.6.0 / torchaudio==2.6.0,
 # which the Docker base image already provides with CUDA 12.4.
 chatterbox-tts @ git+https://github.com/resemble-ai/chatterbox.git@5de7a54aa4e5e2baadb0182dde554908b48b85c2
+# Speech-to-text for reference transcripts (STT_ENGINE=faster-whisper, MIT).
+faster-whisper>=1.1,<2

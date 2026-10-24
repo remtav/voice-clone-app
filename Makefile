@@ -2,7 +2,7 @@
 
 # Run locally without a GPU using the tone-generator engine.
 dev:
-	TTS_ENGINE=fake DATA_DIR=data uvicorn app.main:create_app --factory --reload --port 8000
+	TTS_ENGINE=fake STT_ENGINE=fake DATA_DIR=data uvicorn app.main:create_app --factory --reload --port 8000
 
 # Run locally with Chatterbox (needs the engine deps: pip install -r requirements-engine.txt).
 dev-gpu:

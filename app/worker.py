@@ -23,6 +23,7 @@ from app.audio import concat_with_silence, peak_normalize, write_wav
 from app.config import Settings
 from app.db import Database
 from app.engines.base import Engine, SynthesisParams
+from app.stt import Transcriber
 from app.text import split_text
 from app.training import APP_HEARTBEAT_KEY
 
@@ -41,9 +42,11 @@ class SetModel:
 
 
 class Worker:
-    def __init__(self, db: Database, engine: Engine, settings: Settings, poll_seconds: float = 2.0) -> None:
+    def __init__(self, db: Database, engine: Engine, settings: Settings, poll_seconds: float = 2.0,
+                 transcriber: Transcriber | None = None) -> None:
         self.db = db
         self.engine = engine
+        self.transcriber = transcriber
         self.settings = settings
         self.poll_seconds = poll_seconds
         self._queue: queue.Queue[object] = queue.Queue()
@@ -136,6 +139,8 @@ class Worker:
         if training and self.engine.loaded and self.current_job_id is None:
             log.info("Training run active: unloading the model to free the GPU")
             self.engine.unload()
+        if training and self.transcriber is not None and self.transcriber.loaded:
+            self.transcriber.unload()
         self.paused_for_training = training
         now = time.time()
         if force_beat or training or now - self._last_beat >= 5 * self.poll_seconds:

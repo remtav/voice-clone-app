@@ -37,6 +37,7 @@ def settings(tmp_path: Path) -> Settings:
     return Settings(
         data_dir=tmp_path / "data",
         engine="fake",
+        stt_engine="fake",
         app_password="",
         preload_model=True,
         max_chunk_chars=60,
