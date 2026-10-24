@@ -40,11 +40,13 @@ class Settings:
     data_dir: Path = Path("data")
 
     # Engine selection
-    engine: str = "chatterbox"  # "chatterbox" or "fake" (for tests / CPU dev)
+    engine: str = "chatterbox"  # "chatterbox", "qwen", "vc" or "fake" (for tests / CPU dev)
     chatterbox_model: str = "multilingual"  # "multilingual", "english" or "turbo"
     # Multilingual T3 checkpoint: "v2", "v3", or a fine-tuned ``.safetensors`` file
     # (absolute, or relative to ``data_dir``), e.g. "models/t3_fr_ca.safetensors".
     chatterbox_t3_model: str = "v3"
+    # Qwen3-TTS Base checkpoint (Hugging Face id or local directory), for TTS_ENGINE=qwen.
+    qwen_model: str = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
     device: str = "auto"  # "auto", "cuda" or "cpu"
     preload_model: bool = True
 
@@ -81,6 +83,7 @@ class Settings:
             engine=os.environ.get("TTS_ENGINE", "chatterbox"),
             chatterbox_model=os.environ.get("CHATTERBOX_MODEL", "multilingual"),
             chatterbox_t3_model=os.environ.get("CHATTERBOX_T3_MODEL", "v3"),
+            qwen_model=os.environ.get("QWEN_MODEL", "Qwen/Qwen3-TTS-12Hz-1.7B-Base"),
             device=os.environ.get("DEVICE", "auto"),
             preload_model=_bool("PRELOAD_MODEL", True),
             app_password=os.environ.get("APP_PASSWORD", ""),

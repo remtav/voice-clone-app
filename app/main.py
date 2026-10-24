@@ -23,7 +23,14 @@ from app.auth import Auth
 from app.config import Settings
 from app.db import Database, new_id
 from app.engines import create_engine
-from app.models import ActiveModelRequest, GenerateRequest, LoginRequest, TrainingRunRequest, VoiceUpdateRequest
+from app.models import (
+    MAX_TRANSCRIPT_CHARS,
+    ActiveModelRequest,
+    GenerateRequest,
+    LoginRequest,
+    TrainingRunRequest,
+    VoiceUpdateRequest,
+)
 from app.training import ACTIVE_MODEL_KEY, RECIPE_DEFAULTS, RUN_METRICS_NAME, TRAINER_HEARTBEAT_KEY, read_log_tail
 from app.worker import Worker
 
@@ -206,6 +213,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         file: UploadFile = File(...),
         name: str = Form(""),
         language: str = Form(""),
+        transcript: str = Form(""),
     ):
         original = file.filename or "recording"
         suffix = Path(original).suffix.lower()
@@ -219,6 +227,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lang = language.strip().lower() or None
         if lang and engine.multilingual and lang not in engine.languages:
             raise HTTPException(400, f"Unsupported language '{lang}'")
+        clean_transcript = " ".join(transcript.split())
+        if len(clean_transcript) > MAX_TRANSCRIPT_CHARS:
+            raise HTTPException(400, f"Transcript longer than {MAX_TRANSCRIPT_CHARS} characters")
 
         voice_id = new_id()
         tmp_path = settings.uploads_dir / f"{voice_id}{suffix}"
@@ -246,13 +257,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if seconds < settings.min_reference_seconds:
                 raise HTTPException(400, f"Reference clip is too short ({seconds:.1f}s); record at least "
                                          f"{settings.min_reference_seconds:g}s, ideally 5-15s of clean speech.")
+            if clean_transcript and seconds >= settings.max_reference_seconds - 0.05:
+                # The clip was cut, so the transcript no longer matches it: a mismatch makes the
+                # engine read the wrong words aloud.
+                raise HTTPException(400, f"The clip is longer than {settings.max_reference_seconds}s and was cut, "
+                                         "so the transcript would not match. Shorten the clip or raise "
+                                         "MAX_REFERENCE_SECONDS.")
         except Exception:
             dst.unlink(missing_ok=True)
             raise
         finally:
             tmp_path.unlink(missing_ok=True)
 
-        voice = db.create_voice(clean_name, lang, dst.name, seconds, voice_id=voice_id)
+        voice = db.create_voice(clean_name, lang, dst.name, seconds, voice_id=voice_id,
+                                transcript=clean_transcript or None)
         log.info("Voice '%s' created (%s, %.1fs)", voice["name"], voice["id"], seconds)
         return voice
 
@@ -275,6 +293,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if lang and engine.multilingual and lang not in engine.languages:
                 raise HTTPException(400, f"Unsupported language '{lang}'")
             fields["language"] = lang
+        if body.transcript is not None:
+            fields["transcript"] = " ".join(body.transcript.split()) or None
         return db.update_voice(voice_id, **fields)
 
     @app.get("/api/voices/{voice_id}/audio")
@@ -376,7 +396,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 custom.append({"name": path.name, "size_bytes": stat.st_size, "created_at": stat.st_mtime})
         info = engine.info()
         return {"active": info.get("t3_model"), "model_id": info.get("model_id"), "official": list(OFFICIAL_T3),
-                "custom": custom, "switchable": engine.multilingual, "error": worker.model_error}
+                "custom": custom, "switchable": engine.switchable_t3, "error": worker.model_error}
 
     @app.get("/api/models")
     def get_models():
@@ -384,8 +404,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/models/active")
     def set_active_model(body: ActiveModelRequest):
-        if not engine.multilingual:
-            raise HTTPException(400, "Only the multilingual engine can switch T3 checkpoints")
+        if not engine.switchable_t3:
+            raise HTTPException(400, "Only the Chatterbox multilingual engine can switch T3 checkpoints")
         path = model_path(body.model)
         db.set_kv(ACTIVE_MODEL_KEY, {"model": body.model})
         worker.request_model(body.model, path)

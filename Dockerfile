@@ -20,15 +20,20 @@ ENV DEBIAN_FRONTEND=noninteractive \
     DATA_DIR=/data
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ffmpeg git libsndfile1 \
+    && apt-get install -y --no-install-recommends ffmpeg git libsndfile1 sox \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+# Engine dependencies: requirements-engine.txt (Chatterbox, default) or
+# requirements-engine-qwen.txt (Qwen3-TTS, run with TTS_ENGINE=qwen).  They
+# cannot share an image: the two engines pin incompatible transformers versions.
+ARG ENGINE_REQUIREMENTS=requirements-engine.txt
+
 # Dependencies first so code changes do not invalidate the (large) install layer.
-COPY requirements.txt requirements-engine.txt ./
+COPY requirements.txt requirements-engine*.txt ./
 RUN pip install -r requirements.txt \
-    && pip install -r requirements-engine.txt
+    && pip install -r "${ENGINE_REQUIREMENTS}"
 
 VOLUME ["/data"]
 

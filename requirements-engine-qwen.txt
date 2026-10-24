@@ -1,0 +1,6 @@
+# Qwen3-TTS (Apache 2.0, code and weights).  Build with
+#   ENGINE_REQUIREMENTS=requirements-engine-qwen.txt docker compose build app
+# and run with TTS_ENGINE=qwen.  qwen-tts pins transformers==4.57.3, which
+# conflicts with Chatterbox (transformers 5.x): the two engines live in
+# separate images.  torch/torchaudio 2.6.0 come from the base image.
+qwen-tts==0.1.1

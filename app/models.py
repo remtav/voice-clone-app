@@ -6,6 +6,9 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+# A minute of speech is about 1,000 characters.
+MAX_TRANSCRIPT_CHARS = 2000
+
 
 class LoginRequest(BaseModel):
     password: str = Field(..., max_length=1024)
@@ -38,3 +41,4 @@ class ActiveModelRequest(BaseModel):
 class VoiceUpdateRequest(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=120)
     language: str | None = Field(None, max_length=8)
+    transcript: str | None = Field(None, max_length=MAX_TRANSCRIPT_CHARS, description="Exact words of the clip")

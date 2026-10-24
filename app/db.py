@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS voices (
     language    TEXT,
     filename    TEXT NOT NULL,
     duration    REAL,
-    created_at  REAL NOT NULL
+    created_at  REAL NOT NULL,
+    transcript  TEXT
 );
 CREATE TABLE IF NOT EXISTS jobs (
     id               TEXT PRIMARY KEY,
@@ -116,6 +117,10 @@ class Database:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(SCHEMA)
+            # Databases created before voices had a transcript.
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(voices)")}
+            if "transcript" not in columns:
+                conn.execute("ALTER TABLE voices ADD COLUMN transcript TEXT")
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.path), timeout=30, check_same_thread=False)
@@ -125,7 +130,13 @@ class Database:
 
     # Voices --------------------------------------------------------------
     def create_voice(
-        self, name: str, language: str | None, filename: str, duration: float, voice_id: str | None = None
+        self,
+        name: str,
+        language: str | None,
+        filename: str,
+        duration: float,
+        voice_id: str | None = None,
+        transcript: str | None = None,
     ) -> dict:
         voice = {
             "id": voice_id or new_id(),
@@ -134,11 +145,13 @@ class Database:
             "filename": filename,
             "duration": float(duration),
             "created_at": time.time(),
+            "transcript": transcript or None,
         }
+        columns = ("id", "name", "language", "filename", "duration", "created_at", "transcript")
         with self._lock, self._connect() as conn:
             conn.execute(
-                "INSERT INTO voices (id, name, language, filename, duration, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                tuple(voice[k] for k in ("id", "name", "language", "filename", "duration", "created_at")),
+                f"INSERT INTO voices ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})",
+                tuple(voice[k] for k in columns),
             )
         return voice
 
@@ -153,7 +166,7 @@ class Database:
         return dict(row) if row else None
 
     def update_voice(self, voice_id: str, **fields: Any) -> dict | None:
-        allowed = {k: v for k, v in fields.items() if k in {"name", "language"}}
+        allowed = {k: v for k, v in fields.items() if k in {"name", "language", "transcript"}}
         if allowed:
             assignments = ", ".join(f"{k} = ?" for k in allowed)
             with self._lock, self._connect() as conn:

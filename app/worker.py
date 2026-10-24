@@ -224,6 +224,7 @@ class Worker:
                     cfg_weight=float(params.get("cfg_weight", 0.5)),
                     temperature=float(params.get("temperature", 0.8)),
                     seed=(int(base_seed) + index) if base_seed is not None else None,
+                    reference_text=voice.get("transcript"),
                 )
                 pieces.append(self.engine.synthesize(chunk, reference, synth))
                 self.db.update_job(job_id, progress_done=index + 1)

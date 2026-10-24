@@ -43,6 +43,10 @@ class SynthesisParams:
     cfg_weight: float = 0.5
     temperature: float = 0.8
     seed: int | None = None
+    # Exact words of the reference clip, when the voice has one.  Engines that
+    # clone from audio alone (Chatterbox) ignore it; Qwen3-TTS uses it to copy
+    # the speaker's intonation, not just the timbre.
+    reference_text: str | None = None
 
 
 @dataclass
@@ -83,6 +87,11 @@ class Engine(ABC):
     languages: dict[str, str] = {"en": "English"}
     # True when the engine implements :meth:`convert` (speech-to-speech).
     supports_conversion: bool = False
+
+    @property
+    def switchable_t3(self) -> bool:
+        """True when :meth:`set_t3` can swap in a fine-tuned checkpoint (Chatterbox multilingual)."""
+        return type(self).set_t3 is not Engine.set_t3 and self.multilingual
 
     def __init__(self) -> None:
         self._loaded = False
