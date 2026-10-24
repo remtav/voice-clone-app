@@ -68,6 +68,11 @@
               <textarea id="voice-transcript" rows="3" maxlength="2000"
                         placeholder="What is said in the recording, word for word"></textarea>
             </label>
+            <div class="transcribe-row hidden" id="transcribe-row">
+              <button class="btn small" id="transcribe-btn" type="button" disabled
+                      title="Fill the transcript with speech-to-text">Transcribe</button>
+              <span id="transcribe-status" class="muted small"></span>
+            </div>
             <button class="btn btn-primary" id="voice-save" type="submit" disabled>Save voice</button>
           </form>
         </section>

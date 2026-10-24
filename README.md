@@ -46,7 +46,10 @@ French test (one speaker, judged by ear) the speaker's accent came through.
 
 * **Give each voice its transcript** (the *Transcript* field, or `transcript`
   in the API): the exact words of the clip. Without one, only the timbre is
-  cloned.
+  cloned. The app drafts it with speech-to-text (faster-whisper) as soon as a
+  clip is recorded or chosen; **check it word for word** before saving, since
+  Whisper writes standard spellings (Quebec "pis" becomes "puis"). For Quebec
+  French, set `STT_MODEL=ele-sage/whisper-large-v3-turbo-fr-quebecois-ct2`.
 * **Longer, livelier references help**: 30 to 60 seconds with questions,
   emphasis and pauses gave less flat intonation than 25 seconds in that test. Set
   `MAX_REFERENCE_SECONDS=60`. A clip longer than the limit is refused when it
@@ -191,6 +194,10 @@ All settings are environment variables (see `.env.example`).
 | `CHATTERBOX_T3_MODEL` | `v3` | Multilingual T3 checkpoint: `v2`, `v3`, or a fine-tuned `.safetensors` file (absolute, or relative to `DATA_DIR`). See [Regional accents](#regional-accents). |
 | `DEVICE` | `auto` | `auto`, `cuda` or `cpu` (CPU works but is very slow). |
 | `PRELOAD_MODEL` | `1` | Load the model at startup rather than on first use. |
+| `STT_ENGINE` | `faster-whisper` | Speech-to-text that drafts reference transcripts: `faster-whisper`, `fake` or `none`. |
+| `STT_MODEL` | `large-v3-turbo` | Whisper model (faster-whisper size or CTranslate2 model on Hugging Face), loaded on first use. |
+| `STT_DEVICE` | `auto` | `auto`, `cuda` or `cpu`; falls back to the CPU when CUDA cannot be used. |
+| `STT_COMPUTE_TYPE` | `auto` | CTranslate2 compute type (`float16`, `int8`, …). |
 | `MAX_TEXT_CHARS` | `5000` | Max characters per generation. |
 | `MAX_CHUNK_CHARS` | `300` | Chunk size for long texts. |
 | `MAX_UPLOAD_MB` | `50` | Reference clip upload limit. |
@@ -288,6 +295,8 @@ Interactive docs are at `/api/docs`. All endpoints except `/api/config`,
 | `GET` | `/api/voices` | List voices |
 | `POST` | `/api/voices` (multipart `file`, `name`, `language`, `transcript`) | Add a voice |
 | `PATCH` | `/api/voices/{id}` `{name?, language?, transcript?}` | Rename / relabel / set the transcript |
+| `POST` | `/api/transcribe` (multipart `file`, `language`) | Draft transcript of a clip `{text, language, duration, truncated}`; nothing is saved |
+| `POST` | `/api/voices/{id}/transcribe` | Transcribe a saved voice's clip and store it as its transcript |
 | `GET` | `/api/voices/{id}/audio` | Reference WAV |
 | `DELETE` | `/api/voices/{id}` | Remove a voice |
 | `POST` | `/api/generate` `{voice_id, text, language?, exaggeration?, cfg_weight?, temperature?, seed?}` | Queue a job (202) |
