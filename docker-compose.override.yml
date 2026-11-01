@@ -1,0 +1,5 @@
+# Local override: host port 8000 is taken by open-terminal.
+services:
+  app:
+    ports: !override
+      - "127.0.0.1:8010:8000"
