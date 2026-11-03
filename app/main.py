@@ -33,6 +33,7 @@ from app.models import (
 )
 from app.stt import create_transcriber
 from app.training import ACTIVE_MODEL_KEY, RECIPE_DEFAULTS, RUN_METRICS_NAME, TRAINER_HEARTBEAT_KEY, read_log_tail
+from app.version import build_info
 from app.worker import Worker
 
 log = logging.getLogger("voiceclone")
@@ -113,6 +114,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         restore_active_model()
         if not auth.enabled:
             log.warning("APP_PASSWORD is not set: the API is unauthenticated. Do NOT expose this to the internet.")
+        build = build_info()
+        log.info("Voice Clone App %s, commit %s (%s)", build["version"], build["commit_short"] or "unknown",
+                 build["date"] or "date unknown")
         log.info("Engine: %s (%s), data dir: %s", engine.name, engine.variant, settings.data_dir.resolve())
         worker.start(preload=settings.preload_model)
         yield
@@ -181,6 +185,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def config(request: Request):
         return {
             "version": __version__,
+            "build": build_info(),
             "auth_required": auth.enabled,
             "authenticated": is_authenticated(request),
             "engine": engine.info(),

@@ -25,17 +25,27 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Engine dependencies: requirements-engine.txt (Chatterbox, default) or
-# requirements-engine-qwen.txt (Qwen3-TTS, run with TTS_ENGINE=qwen).  They
+# Engine dependencies follow TTS_ENGINE (docker compose passes it from .env):
+# requirements-engine-qwen.txt for qwen, requirements-engine.txt otherwise.  They
 # cannot share an image: the two engines pin incompatible transformers versions.
-ARG ENGINE_REQUIREMENTS=requirements-engine.txt
+ARG TTS_ENGINE=chatterbox
 
 # Dependencies first so code changes do not invalidate the (large) install layer.
 COPY requirements.txt requirements-engine*.txt ./
-RUN pip install -r requirements.txt \
-    && pip install -r "${ENGINE_REQUIREMENTS}"
+RUN if [ "${TTS_ENGINE}" = "qwen" ]; then req=requirements-engine-qwen.txt; else req=requirements-engine.txt; fi \
+    && pip install -r requirements.txt \
+    && pip install -r "${req}" \
+    && echo "${req}" > /app/engine-requirements.txt
 
 VOLUME ["/data"]
+
+# ---------------------------------------------------------------------------
+# Build stamp: the git commit the image was built from, shown in the UI.  Only
+# this small stage sees .git; without it (a source archive) the commit is unknown.
+FROM base AS buildinfo
+COPY . /src
+RUN git config --global --add safe.directory /src \
+    && (git -C /src log -1 --format='{"commit": "%H", "date": "%cI"}' 2>/dev/null || echo '{}') > /build-info.json
 
 # ---------------------------------------------------------------------------
 # Fine-tuning service: same base plus the training/evaluation extras.  It reads
@@ -58,6 +68,7 @@ FROM base AS app
 
 COPY app ./app
 COPY scripts ./scripts
+COPY --from=buildinfo /build-info.json ./app/build-info.json
 
 EXPOSE 8000
 

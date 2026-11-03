@@ -83,14 +83,13 @@ Dans `.env` :
 
 ```bash
 TTS_ENGINE=qwen
-ENGINE_REQUIREMENTS=requirements-engine-qwen.txt
 MAX_REFERENCE_SECONDS=60
 ```
 
 Puis :
 
 ```bash
-docker compose build app      # image distincte de celle de Chatterbox
+docker compose build app      # obligatoire après un changement de TTS_ENGINE
 docker compose up -d app
 docker compose logs -f app    # premier démarrage : téléchargement du modèle (~4,3 Go)
 ```
@@ -101,15 +100,19 @@ refuse donc quand une transcription l'accompagne.
 
 ## 4. Ajouter la voix
 
-Dans l'interface, carte **Add a voice** → onglet **Upload** → `reference.wav`, langue
-**French**, et collez le contenu de `reference.txt` dans **Transcript**. Ou en ligne de
-commande :
+Dans l'interface, carte **Add a voice** → langue **French**, puis onglet **Upload** →
+`reference.wav`. L'application transcrit l'extrait automatiquement (même Whisper québécois) et
+remplit **Transcript** : relisez-le et corrigez-le comme ci-dessus, ou collez-y votre
+`reference.txt` déjà corrigé. Ou en ligne de commande :
 
 ```bash
 curl -c jar -X POST localhost:8000/api/login -H 'content-type: application/json' -d '{"password":"…"}'
 curl -b jar -F file=@voix/reference.wav -F name="Ma voix" -F language=fr \
      -F transcript="$(cat voix/reference.txt)" localhost:8000/api/voices
 ```
+
+Pour transcrire automatiquement une voix déjà enregistrée sans transcription :
+`curl -b jar -X POST localhost:8000/api/voices/<id>/transcribe`.
 
 Pour corriger la transcription d'une voix existante :
 `curl -b jar -X PATCH localhost:8000/api/voices/<id> -H 'content-type: application/json' -d '{"transcript":"…"}'`.

@@ -81,8 +81,18 @@
       toast(`Cannot reach the server: ${err.message}`);
       return;
     }
+    showVersion(state.config);
     if (state.config.auth_required && !state.config.authenticated) showLogin();
     else boot();
+  }
+
+  function showVersion(config) {
+    const build = config.build || {};
+    const link = $("#app-version");
+    const date = build.date ? ` · ${build.date.slice(0, 10)}` : "";
+    link.textContent = `v${config.version}${build.commit_short ? ` · ${build.commit_short}` : ""}${date}`;
+    if (build.url) link.href = build.url;
+    link.title = build.commit ? `Built from commit ${build.commit}` : "Commit unknown (not built from a git checkout)";
   }
 
   function showLogin() {
@@ -103,7 +113,7 @@
     const limits = state.config.limits;
     $("#char-max").textContent = limits.max_text_chars;
     $("#max-ref-seconds").textContent = limits.max_reference_seconds;
-    $("#transcribe-row").classList.toggle("hidden", !state.config.stt?.available);
+    $("#transcribe-status").textContent = sttIdleText();
     updateCharCount();
 
     await Promise.all([loadVoices(), loadJobs()]);
@@ -278,6 +288,14 @@
     if (blob) transcribeClip(true);
   }
 
+  // What the transcript row says while no transcription is running.
+  function sttIdleText() {
+    const stt = state.config?.stt;
+    if (!stt) return "Automatic transcription is off (STT_ENGINE=none): type the transcript.";
+    if (!stt.available) return "Automatic transcription unavailable: faster-whisper is not installed (rebuild the image).";
+    return "A transcript is drafted automatically when you record or choose a clip.";
+  }
+
   // The clip of the active tab, as [blob, filename], or null.
   function currentClip() {
     const tab = document.querySelector(".tab.active")?.dataset.tab;
@@ -294,7 +312,7 @@
   function updateSaveButton() {
     const hasInput = !!currentClip();
     $("#voice-save").disabled = !hasInput;
-    $("#transcribe-btn").disabled = !hasInput || state.transcribing;
+    $("#transcribe-btn").disabled = !hasInput || state.transcribing || !state.config?.stt?.available;
   }
 
   // Speech-to-text draft of the clip.  Automatic runs only fill an empty field (or replace an
@@ -317,7 +335,7 @@
       const result = await api("/api/transcribe", { method: "POST", body: form });
       if (run !== state.transcribeRun) return; // a newer clip replaced this one
       if (auto && box.value.trim() && box.value !== state.autoTranscript) {
-        status.textContent = "";
+        status.textContent = sttIdleText();
         return; // the user started typing meanwhile
       }
       box.value = result.text;
@@ -398,7 +416,7 @@
       toast(`Voice "${voice.name}" saved (${fmtSeconds(voice.duration)})`, "ok");
       $("#voice-name").value = "";
       $("#voice-transcript").value = "";
-      $("#transcribe-status").textContent = "";
+      $("#transcribe-status").textContent = sttIdleText();
       state.autoTranscript = null;
       $("#voice-file").value = "";
       setRecordedBlob(null);

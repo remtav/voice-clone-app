@@ -53,7 +53,8 @@ class Settings:
     # Speech-to-text for reference transcripts: "faster-whisper", "fake" or "none".
     stt_engine: str = "faster-whisper"
     # Whisper checkpoint (CTranslate2 format: a faster-whisper size name, Hugging Face id or directory).
-    stt_model: str = "large-v3-turbo"
+    # The default is fine-tuned on Quebec French; "large-v3-turbo" suits other languages.
+    stt_model: str = "ele-sage/whisper-large-v3-turbo-fr-quebecois-ct2"  # Quebec French
     stt_device: str = "auto"  # "auto", "cuda" or "cpu"
     stt_compute_type: str = "auto"  # CTranslate2 type: "auto", "float16", "int8", ...
 
@@ -95,7 +96,7 @@ class Settings:
             device=os.environ.get("DEVICE", "auto"),
             preload_model=_bool("PRELOAD_MODEL", True),
             stt_engine=os.environ.get("STT_ENGINE", "faster-whisper"),
-            stt_model=os.environ.get("STT_MODEL", "") or "large-v3-turbo",
+            stt_model=os.environ.get("STT_MODEL", "") or "ele-sage/whisper-large-v3-turbo-fr-quebecois-ct2",
             stt_device=os.environ.get("STT_DEVICE", "") or "auto",
             stt_compute_type=os.environ.get("STT_COMPUTE_TYPE", "") or "auto",
             app_password=os.environ.get("APP_PASSWORD", ""),

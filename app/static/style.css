@@ -31,6 +31,8 @@ p { margin: 0 0 10px; }
   background: var(--panel); position: sticky; top: 0; z-index: 5;
 }
 .brand { font-weight: 700; font-size: 1.1rem; white-space: nowrap; }
+.version { margin-left: 8px; font-weight: 400; font-size: 0.75rem; color: var(--muted); text-decoration: none; }
+.version:hover { text-decoration: underline; }
 .status { flex: 1; color: var(--muted); font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--muted); }
 .status.ok .dot { background: var(--ok); }
