@@ -10,7 +10,8 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">🎙️ <span>Voice Clone</span></div>
+    <div class="brand">🎙️ <span>Voice Clone</span>
+      <a id="app-version" class="version" target="_blank" rel="noopener" title="Running version"></a></div>
     <div class="status" id="status-bar" title="Engine status">Connecting…</div>
     <button id="logout-btn" class="btn btn-ghost hidden" type="button">Log out</button>
   </header>
@@ -54,7 +55,7 @@
 
           <div id="tab-upload" class="tab-panel hidden">
             <p class="muted small">WAV, MP3, M4A, OGG, FLAC or WebM. Only the first
-              <span id="max-ref-seconds">30</span> seconds are kept.</p>
+              <span id="max-ref-seconds">60</span> seconds are kept.</p>
             <input type="file" id="voice-file" accept="audio/*,video/*,.wav,.mp3,.m4a,.aac,.ogg,.opus,.flac,.webm,.mp4">
           </div>
 
@@ -68,7 +69,7 @@
               <textarea id="voice-transcript" rows="3" maxlength="2000"
                         placeholder="What is said in the recording, word for word"></textarea>
             </label>
-            <div class="transcribe-row hidden" id="transcribe-row">
+            <div class="transcribe-row" id="transcribe-row">
               <button class="btn small" id="transcribe-btn" type="button" disabled
                       title="Fill the transcript with speech-to-text">Transcribe</button>
               <span id="transcribe-status" class="muted small"></span>

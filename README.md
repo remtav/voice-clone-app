@@ -13,9 +13,13 @@ GitHub Pages at `https://remtav.github.io/voice-clone-app/` (see [`docs/`](docs/
 It simulates the interface in the browser with no backend; the real app needs a
 GPU.
 
+**Default engine: Qwen3-TTS** ([below](#qwen3-tts-default-engine)), which copies a
+speaker's accent and intonation from a clip and its transcript. Chatterbox
+remains available with `TTS_ENGINE=chatterbox`.
+
 ## Engine choice: Chatterbox (Resemble AI)
 
-The engine is [Chatterbox](https://github.com/resemble-ai/chatterbox), picked
+The original engine is [Chatterbox](https://github.com/resemble-ai/chatterbox), picked
 over the alternatives for these reasons:
 
 | Criterion | Chatterbox | Why it matters |
@@ -32,11 +36,11 @@ Three variants are selectable with `CHATTERBOX_MODEL`: `multilingual`
 (default, v3, 23 languages), `english` (the original model) and `turbo`
 (English, fastest, supports `[laugh]`/`[chuckle]` tags).
 
-The engine sits behind a small interface (`app/engines/base.py`). A second
-engine, Qwen3-TTS, is available (below). A `fake` engine that emits tones lets
+The engine sits behind a small interface (`app/engines/base.py`). Qwen3-TTS
+(below) is the default engine. A `fake` engine that emits tones lets
 you run the UI and tests without a GPU.
 
-## Second engine: Qwen3-TTS
+## Qwen3-TTS (default engine)
 
 [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base) (Apache 2.0,
 code and weights) clones a voice from a clip **and its transcript**. With the
@@ -48,8 +52,9 @@ French test (one speaker, judged by ear) the speaker's accent came through.
   in the API): the exact words of the clip. Without one, only the timbre is
   cloned. The app drafts it with speech-to-text (faster-whisper) as soon as a
   clip is recorded or chosen; **check it word for word** before saving, since
-  Whisper writes standard spellings (Quebec "pis" becomes "puis"). For Quebec
-  French, set `STT_MODEL=ele-sage/whisper-large-v3-turbo-fr-quebecois-ct2`.
+  Whisper writes standard spellings (Quebec "pis" becomes "puis"). The default
+  `STT_MODEL` is fine-tuned on Quebec French; set `STT_MODEL=large-v3-turbo`
+  for clips in other languages.
 * **Longer, livelier references help**: 30 to 60 seconds with questions,
   emphasis and pauses gave less flat intonation than 25 seconds in that test. Set
   `MAX_REFERENCE_SECONDS=60`. A clip longer than the limit is refused when it
@@ -69,20 +74,22 @@ clip first: the app does not trim silence or set the level on upload.
 python -m scripts.prepare_reference my-recording.m4a voice/reference.wav --transcribe
 ```
 
-It needs `transformers==4.57.3` while Chatterbox needs 5.x, so it gets its own
-image:
+It needs `transformers==4.57.3` while Chatterbox needs 5.x, so each engine
+gets its own image. `TTS_ENGINE` picks the dependencies at build time, so
+**rebuild after changing it** (otherwise loading fails with
+`No module named 'qwen_tts'`):
 
 ```bash
-# .env
+# .env: the defaults (.env.example)
 TTS_ENGINE=qwen
-ENGINE_REQUIREMENTS=requirements-engine-qwen.txt
 MAX_REFERENCE_SECONDS=60
 
 docker compose build app && docker compose up -d app
 ```
 
-The model has 1.7B parameters, loaded in bfloat16 on GPU. Switching back: restore the three lines and
-rebuild. Voices are shared; transcripts are simply ignored by Chatterbox.
+The model has 1.7B parameters, loaded in bfloat16 on GPU. To use Chatterbox instead, set
+`TTS_ENGINE=chatterbox` and `MAX_REFERENCE_SECONDS=30`, then rebuild. Voices are shared;
+transcripts are simply ignored by Chatterbox.
 
 ## Architecture
 
@@ -139,6 +146,40 @@ To run only the app without a tunnel: `docker compose up -d app`.
 To pre-download the weights instead of waiting on the first request:
 `docker compose run --rm app python -m scripts.download_models`.
 
+## Pre-built image (Docker Hub)
+
+Every push to `main` (a merged PR) that passes the tests builds the app image
+(Qwen3-TTS engine) and pushes it to Docker Hub as
+`<your-user>/voice-clone-app`, tagged `latest` and `sha-<commit>`.
+
+**One-time setup:**
+
+1. On [Docker Hub](https://hub.docker.com), create an access token: *Account
+   settings → Personal access tokens → Generate new token*, with *Read & Write*
+   access. Copy it, it is shown once.
+2. Optional: create the repository `voice-clone-app` (*Repositories → Create*) to
+   choose public or private. Otherwise the first push creates it with your
+   account's default visibility.
+3. On GitHub, in this repository: *Settings → Secrets and variables → Actions →
+   New repository secret*, add:
+   * `DOCKERHUB_USERNAME`: your Docker Hub user name;
+   * `DOCKERHUB_TOKEN`: the token from step 1.
+4. Re-run the latest CI run on `main` (*Actions → CI → Re-run all jobs*), or
+   merge the next PR. The *publish* job pushes the image (the first build takes
+   a while: the CUDA base image is large). Without the secrets, the job only
+   prints a warning.
+
+**Use it instead of building:**
+
+```bash
+# .env
+APP_IMAGE=<your-user>/voice-clone-app:latest
+
+docker compose pull app && docker compose up -d app
+```
+
+The header of the web UI shows the commit the running image was built from.
+
 ## Cloudflare Tunnel setup
 
 1. In the [Zero Trust dashboard](https://one.dash.cloudflare.com/) go to
@@ -187,21 +228,20 @@ All settings are environment variables (see `.env.example`).
 | `SECRET_KEY` | derived | Signs session cookies; set to a random string to make sessions independent of the password. |
 | `SESSION_HOURS` | `168` | Session lifetime. |
 | `TUNNEL_TOKEN` | | Cloudflare tunnel token (compose only). |
-| `TTS_ENGINE` | `chatterbox` | `chatterbox`, `qwen` (see [Second engine](#second-engine-qwen3-tts)), `vc` or `fake`. |
+| `TTS_ENGINE` | `qwen` | `qwen` (see [Qwen3-TTS](#qwen3-tts-default-engine)), `chatterbox`, `vc` or `fake`. Also picks the image's Python dependencies: rebuild after changing it. |
 | `CHATTERBOX_MODEL` | `multilingual` | `multilingual`, `english` or `turbo`. |
-| `ENGINE_REQUIREMENTS` | `requirements-engine.txt` | Build-time: `requirements-engine-qwen.txt` for the Qwen3-TTS image. |
 | `QWEN_MODEL` | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | Qwen3-TTS Base checkpoint (Hugging Face id or local directory). |
 | `CHATTERBOX_T3_MODEL` | `v3` | Multilingual T3 checkpoint: `v2`, `v3`, or a fine-tuned `.safetensors` file (absolute, or relative to `DATA_DIR`). See [Regional accents](#regional-accents). |
 | `DEVICE` | `auto` | `auto`, `cuda` or `cpu` (CPU works but is very slow). |
 | `PRELOAD_MODEL` | `1` | Load the model at startup rather than on first use. |
 | `STT_ENGINE` | `faster-whisper` | Speech-to-text that drafts reference transcripts: `faster-whisper`, `fake` or `none`. |
-| `STT_MODEL` | `large-v3-turbo` | Whisper model (faster-whisper size or CTranslate2 model on Hugging Face), loaded on first use. |
+| `STT_MODEL` | `ele-sage/whisper-large-v3-turbo-fr-quebecois-ct2` | Whisper model (CTranslate2 model on Hugging Face or faster-whisper size), loaded on first use. Fine-tuned on Quebec French; `large-v3-turbo` for other languages. |
 | `STT_DEVICE` | `auto` | `auto`, `cuda` or `cpu`; falls back to the CPU when CUDA cannot be used. |
 | `STT_COMPUTE_TYPE` | `auto` | CTranslate2 compute type (`float16`, `int8`, …). |
 | `MAX_TEXT_CHARS` | `5000` | Max characters per generation. |
 | `MAX_CHUNK_CHARS` | `300` | Chunk size for long texts. |
 | `MAX_UPLOAD_MB` | `50` | Reference clip upload limit. |
-| `MAX_REFERENCE_SECONDS` | `30` | Reference clips are trimmed to this length. |
+| `MAX_REFERENCE_SECONDS` | `60` | Reference clips are trimmed to this length (Qwen3-TTS likes 30-60 s; 30 is plenty for Chatterbox). |
 | `MIN_REFERENCE_SECONDS` | `1` | Shorter clips are rejected. |
 | `HISTORY_LIMIT` | `200` | Finished jobs kept; older ones and their audio are pruned. |
 | `DATA_DIR` | `data` | Storage root (`/data` in Docker). |
@@ -357,6 +397,15 @@ scripts/         download_models.py
 * **Robotic or wrong-accent output**: use a cleaner reference clip in the
   target language, 8–15 s long, and keep `exaggeration` near 0.5.
 * **Sessions reset after restart**: set a fixed `SECRET_KEY`.
+* **Is my install up to date?** The header shows the version, the commit the
+  image was built from and its date (click it to open the commit on GitHub).
+  Compare with the latest commit on `main`; if it is older, `git pull` and
+  `docker compose build app && docker compose up -d app` (or
+  `docker compose pull app && docker compose up -d app` with `APP_IMAGE` set).
+* **`Model failed to load: … No module named 'qwen_tts'`**: the image was built
+  for Chatterbox. Set `TTS_ENGINE=qwen` in `.env` and rebuild (above).
+* **No "Transcribe" button / transcription unavailable**: the image predates
+  speech-to-text or was not rebuilt; rebuild it.
 
 ## Responsible use
 

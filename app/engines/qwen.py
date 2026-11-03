@@ -81,7 +81,14 @@ class QwenEngine(Engine):
         if self._loaded:
             return
         import torch
-        from qwen_tts import Qwen3TTSModel
+
+        try:
+            from qwen_tts import Qwen3TTSModel
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "qwen-tts is not installed: this image was built for another engine. Set TTS_ENGINE=qwen "
+                "in .env, then rebuild and restart: docker compose build app && docker compose up -d app"
+            ) from exc
 
         self.device = self._resolve_device()
         log.info("Loading Qwen3-TTS '%s' on %s ...", self.model_name, self.device)

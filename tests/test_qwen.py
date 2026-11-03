@@ -154,3 +154,11 @@ def test_old_database_gains_transcript_column(tmp_path: Path):
     db = Database(path)
     assert db.get_voice("abc")["transcript"] is None
     assert db.update_voice("abc", transcript="Hello there.")["transcript"] == "Hello there."
+
+
+def test_qwen_missing_package_says_to_rebuild(monkeypatch):
+    torch = types.ModuleType("torch")
+    monkeypatch.setitem(sys.modules, "torch", torch)
+    monkeypatch.setitem(sys.modules, "qwen_tts", None)  # import raises ModuleNotFoundError
+    with pytest.raises(RuntimeError, match="TTS_ENGINE=qwen.*docker compose build app"):
+        QwenEngine().load()

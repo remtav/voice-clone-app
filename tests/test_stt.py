@@ -125,3 +125,9 @@ def test_worker_unloads_stt_for_training(client, wav_file, monkeypatch):
     monkeypatch.setattr(client.app.state.db, "active_run", lambda: {"id": "run"})
     client.app.state.worker._housekeeping()
     assert not stt.loaded
+
+
+def test_default_stt_model_is_quebec_whisper(monkeypatch):
+    monkeypatch.delenv("STT_MODEL", raising=False)
+    assert Settings.from_env().stt_model == "ele-sage/whisper-large-v3-turbo-fr-quebecois-ct2"
+    assert Settings().stt_model == Settings.from_env().stt_model
