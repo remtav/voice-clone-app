@@ -40,7 +40,7 @@ class Settings:
     data_dir: Path = Path("data")
 
     # Engine selection
-    engine: str = "chatterbox"  # "chatterbox", "qwen", "vc" or "fake" (for tests / CPU dev)
+    engine: str = "qwen"  # "qwen", "chatterbox", "vc" or "fake" (for tests / CPU dev)
     chatterbox_model: str = "multilingual"  # "multilingual", "english" or "turbo"
     # Multilingual T3 checkpoint: "v2", "v3", or a fine-tuned ``.safetensors`` file
     # (absolute, or relative to ``data_dir``), e.g. "models/t3_fr_ca.safetensors".
@@ -67,7 +67,7 @@ class Settings:
     max_text_chars: int = 5000
     max_chunk_chars: int = 300
     max_upload_mb: int = 50
-    max_reference_seconds: int = 30
+    max_reference_seconds: int = 60
     min_reference_seconds: float = 1.0
     history_limit: int = 200
 
@@ -89,7 +89,7 @@ class Settings:
     def from_env(cls) -> Settings:
         return cls(
             data_dir=Path(os.environ.get("DATA_DIR", "data")),
-            engine=os.environ.get("TTS_ENGINE", "chatterbox"),
+            engine=os.environ.get("TTS_ENGINE", "qwen"),
             chatterbox_model=os.environ.get("CHATTERBOX_MODEL", "multilingual"),
             chatterbox_t3_model=os.environ.get("CHATTERBOX_T3_MODEL", "v3"),
             qwen_model=os.environ.get("QWEN_MODEL", "Qwen/Qwen3-TTS-12Hz-1.7B-Base"),
@@ -105,7 +105,7 @@ class Settings:
             max_text_chars=_int("MAX_TEXT_CHARS", 5000),
             max_chunk_chars=_int("MAX_CHUNK_CHARS", 300),
             max_upload_mb=_int("MAX_UPLOAD_MB", 50),
-            max_reference_seconds=_int("MAX_REFERENCE_SECONDS", 30),
+            max_reference_seconds=_int("MAX_REFERENCE_SECONDS", 60),
             min_reference_seconds=_float("MIN_REFERENCE_SECONDS", 1.0),
             history_limit=_int("HISTORY_LIMIT", 200),
         )

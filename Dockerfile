@@ -26,9 +26,11 @@ RUN apt-get update \
 WORKDIR /app
 
 # Engine dependencies follow TTS_ENGINE (docker compose passes it from .env):
-# requirements-engine-qwen.txt for qwen, requirements-engine.txt otherwise.  They
-# cannot share an image: the two engines pin incompatible transformers versions.
-ARG TTS_ENGINE=chatterbox
+# requirements-engine-qwen.txt for qwen (the default), requirements-engine.txt
+# otherwise.  They cannot share an image: the two engines pin incompatible
+# transformers versions.  The trainer target fine-tunes Chatterbox: build it with
+# TTS_ENGINE=chatterbox (docker compose does).
+ARG TTS_ENGINE=qwen
 
 # Dependencies first so code changes do not invalidate the (large) install layer.
 COPY requirements.txt requirements-engine*.txt ./

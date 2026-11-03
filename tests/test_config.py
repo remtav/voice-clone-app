@@ -32,3 +32,11 @@ def test_absolute_t3_file_is_kept(tmp_path: Path):
     target = tmp_path / "Custom_T3.safetensors"
     settings = Settings(data_dir=tmp_path / "data", chatterbox_t3_model=str(target))
     assert settings.chatterbox_t3_path == target
+
+
+def test_qwen_is_the_default_engine(monkeypatch):
+    monkeypatch.delenv("TTS_ENGINE", raising=False)
+    monkeypatch.delenv("MAX_REFERENCE_SECONDS", raising=False)
+    settings = Settings.from_env()
+    assert (settings.engine, settings.max_reference_seconds) == ("qwen", 60)
+    assert Settings().engine == "qwen"

@@ -5,8 +5,10 @@ services:
       target: app
       args:
         # Picks the engine's Python dependencies: rebuild after changing TTS_ENGINE.
-        TTS_ENGINE: ${TTS_ENGINE:-chatterbox}
-    image: voice-clone-app:latest
+        TTS_ENGINE: ${TTS_ENGINE:-qwen}
+    # Set APP_IMAGE to the image CI publishes to Docker Hub (e.g. you/voice-clone-app:latest)
+    # to "docker compose pull app" instead of building it.
+    image: ${APP_IMAGE:-voice-clone-app:latest}
     container_name: voice-clone-app
     restart: unless-stopped
     env_file: .env
@@ -36,6 +38,9 @@ services:
     build:
       context: .
       target: trainer
+      args:
+        # The trainer fine-tunes Chatterbox, whatever engine the app runs.
+        TTS_ENGINE: chatterbox
     image: voice-clone-trainer:latest
     container_name: voice-clone-trainer
     restart: unless-stopped

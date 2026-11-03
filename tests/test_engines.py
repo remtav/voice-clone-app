@@ -49,7 +49,7 @@ def fake_chatterbox(monkeypatch):
 
 
 def test_registry_passes_t3_settings(tmp_path: Path):
-    settings = Settings(data_dir=tmp_path, chatterbox_t3_model="models/t3_fr_ca.safetensors")
+    settings = Settings(data_dir=tmp_path, engine="chatterbox", chatterbox_t3_model="models/t3_fr_ca.safetensors")
     engine = create_engine(settings)
     assert isinstance(engine, ChatterboxEngine)
     assert engine.t3_model == "models/t3_fr_ca.safetensors"

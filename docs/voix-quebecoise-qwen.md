@@ -89,7 +89,7 @@ MAX_REFERENCE_SECONDS=60
 Puis :
 
 ```bash
-docker compose build app      # obligatoire après un changement de TTS_ENGINE
+docker compose build app      # obligatoire après un changement de TTS_ENGINE (qwen par défaut)
 docker compose up -d app
 docker compose logs -f app    # premier démarrage : téléchargement du modèle (~4,3 Go)
 ```
