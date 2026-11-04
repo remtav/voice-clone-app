@@ -269,24 +269,41 @@ class Worker:
         finally:
             self.current_job_id = None
 
-    def _heard(self, audio: np.ndarray, language: str | None) -> str | None:
-        """Speech-to-text of generated audio; None when no transcriber can run."""
+    def _heard(self, audio: np.ndarray, language: str | None):
+        """Speech-to-text (with word times) of generated audio; None when no transcriber can run."""
         if self.transcriber is None or not self.transcriber.available:
             return None
         path = self.settings.uploads_dir / f"check-{uuid.uuid4().hex}.wav"
         try:
             write_wav(path, audio, self.engine.sample_rate)
-            return self.transcriber.transcribe(path, language).text
+            return self.transcriber.transcribe(path, language, words=True)
         except Exception:  # noqa: BLE001 - the check is best-effort
             log.exception("Could not check a generated chunk")
             return None
         finally:
             path.unlink(missing_ok=True)
 
+    def _trim_reference_tail(self, audio: np.ndarray, heard, reference_text: str, chunk: str) -> np.ndarray:
+        """Cut off the end of the reference clip when the model opens with it."""
+        words = heard.words or []
+        spill = respeak.leading_spill([w.text for w in words], reference_text, chunk)
+        if not spill or spill >= len(words):
+            return audio
+        end = words[spill - 1].end
+        cut = (end + words[spill].start) / 2 if words[spill].start > end else words[spill].start
+        log.warning("Chunk opened with the end of the reference (%r): trimming %.2fs",
+                    " ".join(w.text for w in words[:spill]), cut)
+        return audio[int(cut * self.engine.sample_rate):]
+
     def _synthesize_checked(self, chunk: str, reference: Path, synth: SynthesisParams,
                             full_transcript: str | None) -> np.ndarray:
-        """Synthesise ``chunk``; redo it (new seed) when the output re-speaks the reference clip."""
-        retries = self.settings.respeak_retries if self.engine.uses_reference_text and full_transcript else 0
+        """Synthesise ``chunk`` and clean it up with speech-to-text.
+
+        An opening that repeats the end of the reference is trimmed; a chunk that re-speaks
+        the reference is redone with a new seed.
+        """
+        checked = self.engine.uses_reference_text and bool(full_transcript)
+        retries = self.settings.respeak_retries if checked else 0
         sr = self.engine.sample_rate
         best: tuple[float, np.ndarray] | None = None
         for attempt in range(retries + 1):
@@ -294,12 +311,15 @@ class Worker:
             if attempt and synth.seed is not None:  # unseeded generations already differ on each try
                 attempt_synth = replace(synth, seed=synth.seed + 1000 * attempt)
             audio = self.engine.synthesize(chunk, reference, attempt_synth)
+            if not checked or not self.settings.respeak_retries:
+                return audio
+            heard = self._heard(audio, synth.language)
+            if heard is None:
+                leaked = respeak.duration_certain(chunk, len(audio) / sr)
+            else:
+                audio = self._trim_reference_tail(audio, heard, synth.reference_text or full_transcript, chunk)
+                leaked = respeak.leaks_reference(heard.text, full_transcript, chunk)
             seconds = len(audio) / sr
-            leaked = False
-            if respeak.duration_suspect(chunk, seconds) and retries:
-                heard = self._heard(audio, synth.language)
-                leaked = (respeak.leaks_reference(heard, full_transcript, chunk) if heard is not None
-                          else respeak.duration_certain(chunk, seconds))
             if not leaked:
                 return audio
             log.warning("Chunk re-spoke the reference (%.1fs for %d characters); attempt %d/%d",

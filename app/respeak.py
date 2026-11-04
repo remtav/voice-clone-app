@@ -44,3 +44,22 @@ def leaks_reference(heard: str, reference: str, requested: str) -> bool:
             if run not in req_runs:
                 return True
     return False
+
+
+def _plain(word: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFD", word) if not unicodedata.combining(c))
+
+
+def leading_spill(heard: list[str], reference: str, requested: str, max_words: int = 12) -> int:
+    """Number of words at the start of ``heard`` that are the last words of ``reference``.
+
+    The model sometimes opens with the end of the reference clip (after the cut that removes
+    it).  Returns 0 unless at least 2 words match and ``requested`` does not start with them.
+    """
+    heard_w = [_plain(w) for w in (w for t in heard for w in words_of(t))]
+    ref_w = [_plain(w) for w in words_of(reference)][-max_words:]
+    req_w = [_plain(w) for w in words_of(requested)]
+    for k in range(min(len(ref_w), len(heard_w), max_words), 1, -1):
+        if heard_w[:k] == ref_w[-k:] and req_w[:k] != heard_w[:k]:
+            return k
+    return 0
