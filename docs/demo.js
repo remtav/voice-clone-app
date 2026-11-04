@@ -19,7 +19,7 @@
     no: "Norwegian", pl: "Polish", pt: "Portuguese", ru: "Russian", sv: "Swedish",
     sw: "Swahili", tr: "Turkish", zh: "Chinese",
   };
-  const LIMITS = { max_text_chars: 5000, max_reference_seconds: 30 };
+  const LIMITS = { max_text_chars: 5000, max_reference_seconds: 60 };
 
   const state = {
     voices: [],

@@ -12,7 +12,8 @@ voice from a reference clip in two modes:
 
 Unlike Chatterbox, longer references help: 30 to 60 seconds of lively speech
 (questions, emphasis, pauses) gives noticeably less flat intonation than a
-10-second clip.  Raise ``MAX_REFERENCE_SECONDS`` to 60 for this engine.
+10-second clip.  ``MAX_REFERENCE_SECONDS`` keeps the whole clip; the model is given a sentence-aligned
+part of it (``PROMPT_REFERENCE_SECONDS``), because a long reference gets re-spoken.
 
 Qwen3-TTS needs ``transformers==4.57.3`` while Chatterbox needs 5.x, so it is
 built into its own image: ``ENGINE_REQUIREMENTS=requirements-engine-qwen.txt``
@@ -54,6 +55,7 @@ PROMPT_CACHE_SIZE = 16
 class QwenEngine(Engine):
     name = "qwen"
     multilingual = True
+    uses_reference_text = True
 
     def __init__(self, model: str = "Qwen/Qwen3-TTS-12Hz-1.7B-Base", device: str = "auto") -> None:
         super().__init__()

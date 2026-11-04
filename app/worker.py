@@ -16,13 +16,18 @@ import logging
 import queue
 import threading
 import time
-from dataclasses import dataclass
+import uuid
+from dataclasses import dataclass, replace
 from pathlib import Path
 
+import numpy as np
+
+from app import respeak
 from app.audio import concat_with_silence, peak_normalize, write_wav
 from app.config import Settings
 from app.db import Database
 from app.engines.base import Engine, SynthesisParams
+from app.prompt_clip import prepare_prompt_clip
 from app.stt import Transcriber
 from app.text import split_text
 from app.training import APP_HEARTBEAT_KEY
@@ -211,6 +216,14 @@ class Worker:
                 "Job %s: %d chunk(s), voice '%s', language %s", job_id, len(chunks), voice["name"], job["language"]
             )
 
+            reference_text = voice.get("transcript")
+            if self.engine.uses_reference_text:
+                # A short, sentence-aligned part of the voice: a long reference gets re-spoken.
+                prompt = prepare_prompt_clip(reference, reference_text, self.settings.prompt_reference_seconds,
+                                             self.transcriber, voice.get("language"))
+                if prompt is not None:
+                    reference, reference_text = prompt.path, prompt.text
+
             params = job.get("params") or {}
             base_seed = params.get("seed")
             pieces = []
@@ -229,9 +242,9 @@ class Worker:
                     cfg_weight=float(params.get("cfg_weight", 0.5)),
                     temperature=float(params.get("temperature", 0.8)),
                     seed=(int(base_seed) + index) if base_seed is not None else None,
-                    reference_text=voice.get("transcript"),
+                    reference_text=reference_text,
                 )
-                pieces.append(self.engine.synthesize(chunk, reference, synth))
+                pieces.append(self._synthesize_checked(chunk, reference, synth, voice.get("transcript")))
                 self.db.update_job(job_id, progress_done=index + 1)
 
             sr = self.engine.sample_rate
@@ -255,6 +268,48 @@ class Worker:
             self.failed += 1
         finally:
             self.current_job_id = None
+
+    def _heard(self, audio: np.ndarray, language: str | None) -> str | None:
+        """Speech-to-text of generated audio; None when no transcriber can run."""
+        if self.transcriber is None or not self.transcriber.available:
+            return None
+        path = self.settings.uploads_dir / f"check-{uuid.uuid4().hex}.wav"
+        try:
+            write_wav(path, audio, self.engine.sample_rate)
+            return self.transcriber.transcribe(path, language).text
+        except Exception:  # noqa: BLE001 - the check is best-effort
+            log.exception("Could not check a generated chunk")
+            return None
+        finally:
+            path.unlink(missing_ok=True)
+
+    def _synthesize_checked(self, chunk: str, reference: Path, synth: SynthesisParams,
+                            full_transcript: str | None) -> np.ndarray:
+        """Synthesise ``chunk``; redo it (new seed) when the output re-speaks the reference clip."""
+        retries = self.settings.respeak_retries if self.engine.uses_reference_text and full_transcript else 0
+        sr = self.engine.sample_rate
+        best: tuple[float, np.ndarray] | None = None
+        for attempt in range(retries + 1):
+            attempt_synth = synth
+            if attempt and synth.seed is not None:  # unseeded generations already differ on each try
+                attempt_synth = replace(synth, seed=synth.seed + 1000 * attempt)
+            audio = self.engine.synthesize(chunk, reference, attempt_synth)
+            seconds = len(audio) / sr
+            leaked = False
+            if respeak.duration_suspect(chunk, seconds) and retries:
+                heard = self._heard(audio, synth.language)
+                leaked = (respeak.leaks_reference(heard, full_transcript, chunk) if heard is not None
+                          else respeak.duration_certain(chunk, seconds))
+            if not leaked:
+                return audio
+            log.warning("Chunk re-spoke the reference (%.1fs for %d characters); attempt %d/%d",
+                        seconds, len(chunk), attempt + 1, retries + 1)
+            if best is None or seconds < best[0]:
+                best = (seconds, audio)
+        log.warning("Keeping the shortest of %d attempts for a chunk that kept re-speaking the reference",
+                    retries + 1)
+        assert best is not None
+        return best[1]
 
     def _prune(self) -> None:
         removed = self.db.prune_jobs(self.settings.history_limit)

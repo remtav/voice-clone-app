@@ -114,6 +114,7 @@
     $("#char-max").textContent = limits.max_text_chars;
     $("#max-ref-seconds").textContent = limits.max_reference_seconds;
     $("#transcribe-status").textContent = sttIdleText();
+    document.querySelectorAll(".max-ref-seconds").forEach((n) => (n.textContent = limits.max_reference_seconds));
     updateCharCount();
 
     await Promise.all([loadVoices(), loadJobs()]);
@@ -283,6 +284,7 @@
     } else {
       preview.removeAttribute("src");
       preview.classList.add("hidden");
+      setClipStep(null);
     }
     updateSaveButton();
     if (blob) transcribeClip(true);
@@ -315,6 +317,67 @@
     $("#transcribe-btn").disabled = !hasInput || state.transcribing || !state.config?.stt?.available;
   }
 
+  // POST a form and follow the NDJSON events the server streams back, while reporting the
+  // upload's progress (fetch cannot).  Resolves with the last event.
+  function postStaged(path, form, onUpload, onEvent) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", path);
+      xhr.withCredentials = true;
+      let read = 0;
+      let last = null;
+      const drain = () => {
+        const lines = xhr.responseText.slice(read).split("\n");
+        lines.pop(); // incomplete tail
+        for (const line of lines) {
+          read += line.length + 1;
+          if (!line.trim()) continue;
+          last = JSON.parse(line);
+          onEvent(last);
+        }
+      };
+      xhr.upload.onprogress = (e) => e.lengthComputable && onUpload(e.loaded / e.total);
+      xhr.onprogress = () => xhr.status === 200 && drain();
+      xhr.onerror = () => reject(new Error("Network error"));
+      xhr.onload = () => {
+        if (xhr.status === 401) { showLogin(); return reject(new Error("Authentication required")); }
+        if (xhr.status !== 200) {
+          let detail = xhr.statusText;
+          try { const body = JSON.parse(xhr.responseText); detail = typeof body.detail === "string" ? body.detail : detail; } catch (_) { /* not JSON */ }
+          return reject(new Error(detail));
+        }
+        drain();
+        if (last?.stage === "error") return reject(new Error(last.detail));
+        resolve(last);
+      };
+      xhr.send(form);
+    });
+  }
+
+  // Show which step of preparing a clip is running: upload, cut, transcribe.
+  function setClipStep(step, fraction) {
+    const order = ["upload", "clip", "transcribe"];
+    const steps = $("#clip-steps");
+    const bar = $("#clip-progress");
+    steps.classList.toggle("hidden", !step);
+    bar.classList.toggle("hidden", !step);
+    if (!step) return;
+    const at = order.indexOf(step);
+    steps.querySelectorAll("li").forEach((li) => {
+      const i = order.indexOf(li.dataset.step);
+      li.className = step === "failed" ? li.className : i < at ? "done" : i === at ? "active" : "";
+    });
+    // Upload is a real percentage; cutting and transcribing have no measurable progress.
+    bar.classList.toggle("indeterminate", step !== "upload");
+    bar.firstElementChild.style.width = step === "upload" ? `${Math.round((fraction || 0) * 100)}%` : "";
+  }
+
+  function failClipStep() {
+    const active = document.querySelector("#clip-steps li.active");
+    if (active) active.className = "failed";
+    $("#clip-progress").classList.add("hidden");
+  }
+
   // Speech-to-text draft of the clip.  Automatic runs only fill an empty field (or replace an
   // earlier automatic draft), so text the user typed or corrected is never overwritten.
   async function transcribeClip(auto = false) {
@@ -327,27 +390,44 @@
     const status = $("#transcribe-status");
     state.transcribing = true;
     updateSaveButton();
-    status.textContent = "Transcribing… (the first run downloads the speech-to-text model)";
+    status.textContent = "";
+    setClipStep("upload", 0);
     const form = new FormData();
     form.append("file", clip[0], clip[1]);
     form.append("language", $("#voice-language").value || "");
+    form.append("stream", "true");
+    const current = () => run === state.transcribeRun;
     try {
-      const result = await api("/api/transcribe", { method: "POST", body: form });
-      if (run !== state.transcribeRun) return; // a newer clip replaced this one
+      const result = await postStaged(
+        "/api/transcribe",
+        form,
+        (fraction) => current() && setClipStep("upload", fraction),
+        (e) => {
+          if (!current()) return;
+          setClipStep(e.stage);
+          if (e.stage === "transcribe") {
+            status.textContent = "(the first run downloads the speech-to-text model)";
+          }
+        },
+      );
+      if (!current()) return; // a newer clip replaced this one
+      setClipStep(null);
       if (auto && box.value.trim() && box.value !== state.autoTranscript) {
         status.textContent = sttIdleText();
         return; // the user started typing meanwhile
       }
       box.value = result.text;
       state.autoTranscript = result.text;
-      status.textContent = result.truncated
-        ? `The clip is longer than ${state.config.limits.max_reference_seconds}s and will be cut: shorten it, `
-          + "or the transcript will be refused."
-        : result.text ? "Check the transcript word for word against the recording." : "No speech found.";
+      const max = state.config.limits.max_reference_seconds;
+      status.textContent = (result.truncated ? `Clip cut to the first ${max}s. ` : "")
+        + (result.text ? "Check the transcript word for word against the recording." : "No speech found.");
     } catch (err) {
-      if (run === state.transcribeRun) status.textContent = `Transcription failed: ${err.message}`;
+      if (current()) {
+        failClipStep();
+        status.textContent = `Transcription failed: ${err.message}`;
+      }
     } finally {
-      if (run === state.transcribeRun) {
+      if (current()) {
         state.transcribing = false;
         updateSaveButton();
       }
@@ -417,6 +497,7 @@
       $("#voice-name").value = "";
       $("#voice-transcript").value = "";
       $("#transcribe-status").textContent = sttIdleText();
+      setClipStep(null);
       state.autoTranscript = null;
       $("#voice-file").value = "";
       setRecordedBlob(null);

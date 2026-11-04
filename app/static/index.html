@@ -55,7 +55,8 @@
 
           <div id="tab-upload" class="tab-panel hidden">
             <p class="muted small">WAV, MP3, M4A, OGG, FLAC or WebM. Only the first
-              <span id="max-ref-seconds">60</span> seconds are kept.</p>
+              <span id="max-ref-seconds">60</span> seconds are kept: a longer
+              clip is cut automatically, then transcribed.</p>
             <input type="file" id="voice-file" accept="audio/*,video/*,.wav,.mp3,.m4a,.aac,.ogg,.opus,.flac,.webm,.mp4">
           </div>
 
@@ -74,6 +75,12 @@
                       title="Fill the transcript with speech-to-text">Transcribe</button>
               <span id="transcribe-status" class="muted small"></span>
             </div>
+            <ol id="clip-steps" class="clip-steps hidden small">
+              <li data-step="upload">Sending the audio</li>
+              <li data-step="clip">Cutting to the first <span class="max-ref-seconds">60</span> s</li>
+              <li data-step="transcribe">Transcribing</li>
+            </ol>
+            <div id="clip-progress" class="progress hidden"><div></div></div>
             <button class="btn btn-primary" id="voice-save" type="submit" disabled>Save voice</button>
           </form>
         </section>

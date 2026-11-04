@@ -5,6 +5,7 @@ Run with ``uvicorn app.main:create_app --factory``.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import shutil
@@ -14,7 +15,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import __version__
@@ -31,6 +32,7 @@ from app.models import (
     TrainingRunRequest,
     VoiceUpdateRequest,
 )
+from app.prompt_clip import remove_prompt_clip
 from app.stt import create_transcriber
 from app.training import ACTIVE_MODEL_KEY, RECIPE_DEFAULTS, RUN_METRICS_NAME, TRAINER_HEARTBEAT_KEY, read_log_tail
 from app.version import build_info
@@ -221,11 +223,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(400, f"Unsupported file type '{suffix or content_type or 'unknown'}'")
         return suffix or (".webm" if "webm" in content_type else ".bin")
 
-    async def receive_reference(file: UploadFile, suffix: str, dst: Path) -> float:
-        """Stream an upload to disk and convert it to the reference WAV ``dst``; returns its duration.
-
-        The clip is cut at ``max_reference_seconds``, exactly as a saved voice is.
-        """
+    async def save_upload(file: UploadFile, suffix: str) -> Path:
+        """Stream an upload to a temporary file in the uploads dir; the caller deletes it."""
         tmp_path = settings.uploads_dir / f"{new_id()}{suffix}"
         limit = settings.max_upload_mb * 1024 * 1024
         written = 0
@@ -241,19 +240,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     fh.write(chunk)
             if written == 0:
                 raise HTTPException(400, "Empty upload")
-            try:
-                seconds = await run_in_threadpool(
-                    convert_to_wav, tmp_path, dst, TARGET_SR, settings.max_reference_seconds
-                )
-            except AudioError as exc:
-                raise HTTPException(400, str(exc)) from exc
-            if seconds < settings.min_reference_seconds:
-                raise HTTPException(400, f"Reference clip is too short ({seconds:.1f}s); record at least "
-                                         f"{settings.min_reference_seconds:g}s, ideally 5-15s of clean speech.")
-            return seconds
         except Exception:
-            dst.unlink(missing_ok=True)
+            tmp_path.unlink(missing_ok=True)
             raise
+        return tmp_path
+
+    async def convert_reference(src: Path, dst: Path) -> tuple[float, bool]:
+        """Convert ``src`` to the reference WAV ``dst``, cut at ``max_reference_seconds``.
+
+        Returns the duration and whether the clip was cut.
+        """
+        try:
+            seconds = await run_in_threadpool(convert_to_wav, src, dst, TARGET_SR, settings.max_reference_seconds)
+        except AudioError as exc:
+            dst.unlink(missing_ok=True)
+            raise HTTPException(400, str(exc)) from exc
+        if seconds < settings.min_reference_seconds:
+            dst.unlink(missing_ok=True)
+            raise HTTPException(400, f"Reference clip is too short ({seconds:.1f}s); record at least "
+                                     f"{settings.min_reference_seconds:g}s, ideally 5-15s of clean speech.")
+        return seconds, seconds >= settings.max_reference_seconds - 0.05
+
+    async def receive_reference(file: UploadFile, suffix: str, dst: Path) -> float:
+        """Save an upload and convert it to the reference WAV ``dst``; returns its duration."""
+        tmp_path = await save_upload(file, suffix)
+        try:
+            return (await convert_reference(tmp_path, dst))[0]
         finally:
             tmp_path.unlink(missing_ok=True)
 
@@ -276,19 +288,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"text": result.text[:MAX_TRANSCRIPT_CHARS], "language": result.language}
 
     @app.post("/api/transcribe")
-    async def transcribe(file: UploadFile = File(...), language: str = Form("")):
-        """Draft transcript of a clip before it is saved as a voice (the user reviews it)."""
+    async def transcribe(file: UploadFile = File(...), language: str = Form(""), stream: bool = Form(False)):
+        """Draft transcript of a clip before it is saved as a voice (the user reviews it).
+
+        The clip is cut at ``max_reference_seconds`` first, so the transcript matches what is saved.
+        With ``stream`` the answer is NDJSON progress events (``clip``, ``transcribe``, then ``done``
+        or ``error``) instead of one JSON object.
+        """
         require_stt()
         suffix = check_upload_type(file)
+        src = await save_upload(file, suffix)
         wav = settings.uploads_dir / f"stt-{new_id()}.wav"
-        try:
-            seconds = await receive_reference(file, suffix, wav)
+
+        async def stages():
+            yield {"stage": "clip"}
+            seconds, cut = await convert_reference(src, wav)
+            yield {"stage": "transcribe", "duration": seconds, "truncated": cut}
             result = await run_stt(wav, language)
-        finally:
+            yield {"stage": "done", **result, "duration": seconds, "truncated": cut}
+
+        def cleanup() -> None:
+            src.unlink(missing_ok=True)
             wav.unlink(missing_ok=True)
-        # A cut clip cannot be saved with a transcript; say so before the user edits the text.
-        result.update(duration=seconds, truncated=seconds >= settings.max_reference_seconds - 0.05)
-        return result
+
+        if not stream:
+            try:
+                last = {}
+                async for event in stages():
+                    last = event
+                last.pop("stage")
+                return last
+            finally:
+                cleanup()
+
+        async def ndjson():
+            try:
+                async for event in stages():
+                    yield json.dumps(event) + "\n"
+            except HTTPException as exc:
+                yield json.dumps({"stage": "error", "detail": exc.detail}) + "\n"
+            finally:
+                cleanup()
+
+        return StreamingResponse(ndjson(), media_type="application/x-ndjson")
 
     @app.get("/api/voices")
     def list_voices():
@@ -313,14 +355,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         voice_id = new_id()
         dst = settings.voices_dir / f"{voice_id}.wav"
         seconds = await receive_reference(file, suffix, dst)
-        if clean_transcript and seconds >= settings.max_reference_seconds - 0.05:
-            # The clip was cut, so the transcript no longer matches it: a mismatch makes the
-            # engine read the wrong words aloud.
-            dst.unlink(missing_ok=True)
-            raise HTTPException(400, f"The clip is longer than {settings.max_reference_seconds}s and was cut, "
-                                     "so the transcript would not match. Shorten the clip or raise "
-                                     "MAX_REFERENCE_SECONDS.")
-
         voice = db.create_voice(clean_name, lang, dst.name, seconds, voice_id=voice_id,
                                 transcript=clean_transcript or None)
         log.info("Voice '%s' created (%s, %.1fs)", voice["name"], voice["id"], seconds)
@@ -378,6 +412,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(404, "Voice not found")
         db.delete_voice(voice_id)
         (settings.voices_dir / voice["filename"]).unlink(missing_ok=True)
+        remove_prompt_clip(settings.voices_dir / voice["filename"])
         return Response(status_code=204)
 
     # Generation --------------------------------------------------------------
