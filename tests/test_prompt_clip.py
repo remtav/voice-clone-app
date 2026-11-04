@@ -10,7 +10,7 @@ from app.config import Settings
 from app.engines.fake import FakeEngine
 from app.prompt_clip import cut_transcript, pick_cut, prepare_prompt_clip, remove_prompt_clip
 from app.stt import FakeTranscriber, Word
-from tests.conftest import make_wav, upload_voice, wait_for_job
+from tests.conftest import make_wav, wait_for_job
 
 SENTENCES = "Bon, je vais vous expliquer. Ensuite on y va. Pis ça marche? Oui, certain! Voilà."
 
