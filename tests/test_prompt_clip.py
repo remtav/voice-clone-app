@@ -163,8 +163,7 @@ class TailTranscriber(FakeTranscriber):
     def transcribe(self, wav, language=None, words=False):
         data, sr = sf.read(str(wav))
         seconds = len(data) / sr
-        spoken = ["Salut", "tout"]
-        timed = [Word(0.0, 0.4, "voilà"), Word(0.5, 0.9, "pas"), Word(1.1, 1.4, spoken[0]), Word(1.5, seconds, spoken[1])]
+        timed = [Word(0.0, 0.4, "voilà"), Word(0.5, 0.9, "pas"), Word(1.1, 1.4, "Salut"), Word(1.5, seconds, "tout")]
         return type(super().transcribe(wav, language))("voilà pas Salut tout", language, timed if words else None)
 
 
