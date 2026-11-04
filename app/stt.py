@@ -27,9 +27,17 @@ log = logging.getLogger(__name__)
 
 
 @dataclass
+class Word:
+    start: float
+    end: float
+    text: str
+
+
+@dataclass
 class Transcript:
     text: str
     language: str | None = None
+    words: list[Word] | None = None  # only when word timestamps were asked for
 
 
 class Transcriber(ABC):
@@ -50,8 +58,11 @@ class Transcriber(ABC):
         return True
 
     @abstractmethod
-    def transcribe(self, wav: Path, language: str | None = None) -> Transcript:
-        """Transcribe ``wav``; ``language`` None means auto-detect."""
+    def transcribe(self, wav: Path, language: str | None = None, words: bool = False) -> Transcript:
+        """Transcribe ``wav``; ``language`` None means auto-detect.
+
+        ``words`` also fills ``Transcript.words`` with per-word timestamps.
+        """
 
     def unload(self) -> None:
         self._loaded = False
@@ -65,9 +76,18 @@ class FakeTranscriber(Transcriber):
     name = "fake"
     TEXT = "This is a fake transcript of the reference clip."
 
-    def transcribe(self, wav: Path, language: str | None = None) -> Transcript:
+    def transcribe(self, wav: Path, language: str | None = None, words: bool = False) -> Transcript:
         self._loaded = True
-        return Transcript(self.TEXT, language or "en")
+        timed = None
+        if words:  # spread the words evenly over the clip
+            import soundfile as sf
+
+            info = sf.info(str(wav))
+            seconds = info.frames / info.samplerate
+            tokens = self.TEXT.split()
+            step = seconds / len(tokens)
+            timed = [Word(i * step, (i + 1) * step - 0.02, t) for i, t in enumerate(tokens)]
+        return Transcript(self.TEXT, language or "en", timed)
 
 
 class FasterWhisperTranscriber(Transcriber):
@@ -97,17 +117,24 @@ class FasterWhisperTranscriber(Transcriber):
         self.load_error = None
         log.info("STT model %s loaded on %s in %.1fs", self.model, device, time.time() - started)
 
-    def _run(self, wav: Path, language: str | None) -> Transcript:
-        segments, info = self._model.transcribe(str(wav), language=language, beam_size=5, vad_filter=True)
-        text = " ".join(s.text.strip() for s in segments)  # segments is lazy: decoding happens here
-        return Transcript(" ".join(text.split()), getattr(info, "language", language))
+    def _run(self, wav: Path, language: str | None, words: bool) -> Transcript:
+        segments, info = self._model.transcribe(
+            str(wav), language=language, beam_size=5, vad_filter=True, word_timestamps=words
+        )
+        segments = list(segments)  # lazy: decoding happens here
+        text = " ".join(s.text.strip() for s in segments)
+        timed = None
+        if words:
+            timed = [Word(float(w.start), float(w.end), w.word.strip())
+                     for seg in segments for w in (getattr(seg, "words", None) or [])]
+        return Transcript(" ".join(text.split()), getattr(info, "language", language), timed)
 
-    def transcribe(self, wav: Path, language: str | None = None) -> Transcript:
+    def transcribe(self, wav: Path, language: str | None = None, words: bool = False) -> Transcript:
         with self._lock:
             try:
                 if self._model is None:
                     self._load(self.device)
-                return self._run(wav, language)
+                return self._run(wav, language, words)
             except (RuntimeError, OSError, ValueError) as exc:
                 # A missing libcublas/cuDNN often surfaces only on the first decode.
                 if self.device == "cpu":
@@ -117,7 +144,7 @@ class FasterWhisperTranscriber(Transcriber):
                 self.device = "cpu"
                 self._model = None
                 self._load("cpu")
-                return self._run(wav, language)
+                return self._run(wav, language, words)
 
     def unload(self) -> None:
         with self._lock:

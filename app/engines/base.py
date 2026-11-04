@@ -87,6 +87,8 @@ class Engine(ABC):
     languages: dict[str, str] = {"en": "English"}
     # True when the engine implements :meth:`convert` (speech-to-speech).
     supports_conversion: bool = False
+    # True when the engine continues the reference clip using its transcript (in-context cloning).
+    uses_reference_text: bool = False
 
     @property
     def switchable_t3(self) -> bool:

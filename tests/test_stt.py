@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import types
 from pathlib import Path
@@ -87,6 +88,14 @@ def test_transcribe_endpoint_drafts_without_saving(client, settings, wav_file):
 def test_transcribe_endpoint_flags_cut_clips(client, settings, tmp_path):
     res = post_clip(client, make_wav(tmp_path / "long.wav", seconds=settings.max_reference_seconds + 3))
     assert res.status_code == 200 and res.json()["truncated"]
+
+
+def test_transcribe_endpoint_streams_progress(client, wav_file):
+    with wav_file.open("rb") as fh:
+        res = client.post("/api/transcribe", files={"file": ("a.wav", fh, "audio/wav")}, data={"stream": "true"})
+    events = [json.loads(line) for line in res.text.splitlines()]
+    assert [e["stage"] for e in events] == ["clip", "transcribe", "done"]
+    assert events[-1]["text"] == FakeTranscriber.TEXT
 
 
 def test_transcribe_rejects_bad_uploads(client, tmp_path):

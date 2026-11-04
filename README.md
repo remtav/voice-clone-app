@@ -57,8 +57,13 @@ French test (one speaker, judged by ear) the speaker's accent came through.
   for clips in other languages.
 * **Longer, livelier references help**: 30 to 60 seconds with questions,
   emphasis and pauses gave less flat intonation than 25 seconds in that test. Set
-  `MAX_REFERENCE_SECONDS=60`. A clip longer than the limit is refused when it
-  has a transcript, since cutting it would make the transcript wrong.
+  `MAX_REFERENCE_SECONDS=60`. A longer clip is cut to that limit and its
+  transcript is made from the cut clip. A long reference tends to be re-spoken
+  in the output, so the model is given only the start of the voice, ended on a
+  sentence boundary with the matching part of the transcript
+  (`PROMPT_REFERENCE_SECONDS`, 20 by default, up to 45). The stored voice is
+  unchanged. If a generated chunk still re-speaks the reference, it is
+  detected with speech-to-text and redone (`RESPEAK_RETRIES`).
 * **Settings**: `temperature` (0.9 is the model's default) and `seed` apply;
   `exaggeration` and `cfg_weight` are Chatterbox-only and are ignored.
 * **Languages**: Chinese, English, French, German, Italian, Japanese, Korean,
@@ -242,6 +247,8 @@ All settings are environment variables (see `.env.example`).
 | `MAX_CHUNK_CHARS` | `300` | Chunk size for long texts. |
 | `MAX_UPLOAD_MB` | `50` | Reference clip upload limit. |
 | `MAX_REFERENCE_SECONDS` | `60` | Reference clips are trimmed to this length (Qwen3-TTS likes 30-60 s; 30 is plenty for Chatterbox). |
+| `PROMPT_REFERENCE_SECONDS` | `20` | Qwen3-TTS: length of the sentence-aligned part of a voice given to the model (3-45, `0` = whole clip). |
+| `RESPEAK_RETRIES` | `2` | Qwen3-TTS: extra attempts when a chunk re-speaks the reference (`0` = no check). |
 | `MIN_REFERENCE_SECONDS` | `1` | Shorter clips are rejected. |
 | `HISTORY_LIMIT` | `200` | Finished jobs kept; older ones and their audio are pruned. |
 | `DATA_DIR` | `data` | Storage root (`/data` in Docker). |

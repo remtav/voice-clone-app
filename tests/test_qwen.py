@@ -133,14 +133,15 @@ def test_voice_transcript_is_stored_edited_and_used(client, wav_file, monkeypatc
     assert upload_voice(client, wav_file)["transcript"] is None
 
 
-def test_transcript_rejected_when_clip_is_cut(client, settings, tmp_path):
+def test_long_clip_is_cut_and_keeps_its_transcript(client, settings, tmp_path):
     long_clip = make_wav(tmp_path / "long.wav", seconds=settings.max_reference_seconds + 2)
     with long_clip.open("rb") as fh:
         res = client.post(
             "/api/voices", files={"file": ("long.wav", fh, "audio/wav")}, data={"transcript": "Some words."}
         )
-    assert res.status_code == 400 and "MAX_REFERENCE_SECONDS" in res.json()["detail"]
-    assert client.get("/api/voices").json() == []
+    assert res.status_code == 201
+    assert res.json()["duration"] == pytest.approx(settings.max_reference_seconds, abs=0.1)
+    assert res.json()["transcript"] == "Some words."
 
 
 def test_old_database_gains_transcript_column(tmp_path: Path):

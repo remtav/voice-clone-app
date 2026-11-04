@@ -155,3 +155,13 @@ audio { width: 100%; height: 36px; }
 .run-stage { font-size: 0.85rem; }
 .run-log { max-height: 260px; overflow: auto; margin: 0; padding: 8px; border: 1px solid var(--border); border-radius: 6px;
   background: #0f1117; color: #c9cdd8; font-size: 0.75rem; white-space: pre-wrap; word-break: break-word; }
+
+/* Clip preparation steps ---------------------------------------------- */
+.clip-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.clip-steps li { color: var(--muted); }
+.clip-steps li::before { content: "○ "; }
+.clip-steps li.active { color: var(--text, inherit); }
+.clip-steps li.active::before { content: "◔ "; }
+.clip-steps li.done::before { content: "✓ "; color: var(--accent); }
+.clip-steps li.failed { color: #e5534b; }
+.clip-steps li.failed::before { content: "✗ "; }

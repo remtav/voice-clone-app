@@ -19,6 +19,8 @@ def _bool(name: str, default: bool) -> bool:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
+MAX_PROMPT_REFERENCE_SECONDS = 45
+
 
 def _int(name: str, default: int) -> int:
     raw = os.environ.get(name)
@@ -69,11 +71,17 @@ class Settings:
     max_upload_mb: int = 50
     max_reference_seconds: int = 60
     min_reference_seconds: float = 1.0
+    # Length of the clip handed to engines that clone in context (0 = the whole stored clip).
+    prompt_reference_seconds: int = 20
+    # Extra attempts when a generation re-speaks the reference (0 = no check).
+    respeak_retries: int = 2
     history_limit: int = 200
 
     def __post_init__(self) -> None:
         self.data_dir = Path(self.data_dir)
         self.engine = self.engine.lower().strip()
+        if self.prompt_reference_seconds:
+            self.prompt_reference_seconds = max(3, min(MAX_PROMPT_REFERENCE_SECONDS, self.prompt_reference_seconds))
         self.stt_engine = self.stt_engine.lower().strip()
         self.chatterbox_model = self.chatterbox_model.lower().strip()
         # Not lowercased: it may be a file path.
@@ -107,6 +115,8 @@ class Settings:
             max_upload_mb=_int("MAX_UPLOAD_MB", 50),
             max_reference_seconds=_int("MAX_REFERENCE_SECONDS", 60),
             min_reference_seconds=_float("MIN_REFERENCE_SECONDS", 1.0),
+            prompt_reference_seconds=_int("PROMPT_REFERENCE_SECONDS", 20),
+            respeak_retries=max(0, _int("RESPEAK_RETRIES", 2)),
             history_limit=_int("HISTORY_LIMIT", 200),
         )
 

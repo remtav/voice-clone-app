@@ -95,8 +95,11 @@ docker compose logs -f app    # premier démarrage : téléchargement du modèle
 ```
 
 La pastille d'état affiche `Ready · Qwen/Qwen3-TTS-12Hz-1.7B-Base`. Un extrait plus long que
-`MAX_REFERENCE_SECONDS` serait coupé, et sa transcription ne correspondrait plus : l'app le
-refuse donc quand une transcription l'accompagne.
+`MAX_REFERENCE_SECONDS` est coupé, et sa transcription est faite à partir de l'extrait coupé.
+Le modèle reçoit seulement le début de la voix, terminé à une fin de phrase
+(`PROMPT_REFERENCE_SECONDS`, 20 s par défaut, 45 s au maximum), car une référence trop longue
+est souvent relue à voix haute. Si une phrase générée la relit quand même, l'app la détecte
+par transcription et la refait (`RESPEAK_RETRIES`).
 
 ## 4. Ajouter la voix
 
