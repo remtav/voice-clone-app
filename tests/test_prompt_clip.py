@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 import soundfile as sf
 
 from app import respeak
 from app.config import Settings
+from app.engines.base import SynthesisParams
 from app.engines.fake import FakeEngine
 from app.prompt_clip import cut_transcript, pick_cut, prepare_prompt_clip, remove_prompt_clip
 from app.stt import FakeTranscriber, Word
@@ -66,6 +68,15 @@ def test_leak_detection():
     assert respeak.duration_suspect("Salut", 4.0) and not respeak.duration_suspect("Salut à tous", 1.2)
 
 
+def test_leading_spill_is_the_end_of_the_reference():
+    ref = "Bon, on va essayer ça, regarde, on ne le sait pas."
+    heard = ["On", "ne", "le", "sait", "pas", "Allô", "on", "teste"]
+    assert respeak.leading_spill(heard, ref, "Allo on teste") == 5
+    assert respeak.leading_spill(heard, ref, "On ne le sait pas allô") == 0  # the text asks for it
+    assert respeak.leading_spill(["Allô", "on", "teste"], ref, "Allô on teste") == 0
+    assert respeak.leading_spill(["pas", "Allô"], ref, "Allô") == 0  # one word is too little to be sure
+
+
 class LeakyEngine(FakeEngine):
     """Re-speaks the reference (a long output) on the first try of each chunk."""
 
@@ -83,33 +94,92 @@ class LeakyEngine(FakeEngine):
         return audio
 
 
-def test_worker_uses_prompt_clip_and_retries_a_respoken_chunk(tmp_path, monkeypatch):
+class ListeningTranscriber(FakeTranscriber):
+    """Hears the reference in long audio and the requested words in short audio."""
+
+    REFERENCE = "Bon je vais vous expliquer. Ensuite on y va maintenant. Voilà."
+
+    def transcribe(self, wav, language=None, words=False):
+        seconds = sf.info(str(wav)).duration
+        text = self.REFERENCE if seconds > 3.0 else "Salut tout le monde."
+        timed = None
+        if words:
+            tokens = text.split()
+            step = seconds / len(tokens)
+            timed = [Word(i * step, (i + 1) * step - 0.02, t) for i, t in enumerate(tokens)]
+        return type(super().transcribe(wav, language))(text, language, timed)
+
+
+def make_client(tmp_path, engine, transcriber):
     from fastapi.testclient import TestClient
 
     from app.main import create_app
 
-    monkeypatch.setattr(FakeTranscriber, "TEXT", "Bon je vais vous expliquer. Ensuite on y va maintenant. Voilà.")
     settings = Settings(data_dir=tmp_path / "data", engine="fake", stt_engine="fake", prompt_reference_seconds=10,
                         respeak_retries=2, max_chunk_chars=60)
     app = create_app(settings)
-    engine = LeakyEngine()
     app.state.worker.engine = engine
-    with TestClient(app) as client:
-        app.state.worker.engine = engine
+    app.state.worker.transcriber = transcriber
+    return settings, TestClient(app)
+
+
+def add_voice(client, tmp_path, transcript):
+    wav = make_wav(tmp_path / "long.wav", seconds=30.0)
+    with wav.open("rb") as fh:
+        return client.post("/api/voices", files={"file": ("long.wav", fh, "audio/wav")},
+                           data={"transcript": transcript, "language": "fr"}).json()
+
+
+def test_worker_uses_prompt_clip_and_retries_a_respoken_chunk(tmp_path):
+    engine = LeakyEngine()
+    settings, client = make_client(tmp_path, engine, ListeningTranscriber("fake"))
+    with client:
+        client.app.state.worker.engine = engine
         engine.load()
-        wav = make_wav(tmp_path / "long.wav", seconds=30.0)
-        with wav.open("rb") as fh:
-            voice = client.post("/api/voices", files={"file": ("long.wav", fh, "audio/wav")},
-                                data={"transcript": FakeTranscriber.TEXT, "language": "fr"}).json()
+        voice = add_voice(client, tmp_path, ListeningTranscriber.REFERENCE)
         job = client.post("/api/generate", json={"voice_id": voice["id"], "text": "Salut tout le monde."}).json()
         done = wait_for_job(client, job["id"])
         assert done["status"] == "done", done
         assert len(engine.calls) == 2  # leaky first try, clean retry
         text, ref_text, ref_name = engine.calls[0]
-        assert ref_name.endswith(".prompt.wav") and ref_text != FakeTranscriber.TEXT
+        assert ref_name.endswith(".prompt.wav") and ref_text != ListeningTranscriber.REFERENCE
         assert done["duration"] < 3.0  # the clean attempt was kept
         assert client.delete(f"/api/voices/{voice['id']}").status_code == 204
         assert list(settings.voices_dir.iterdir()) == []
+
+
+class TailEngine(FakeEngine):
+    """Opens every chunk with 1 s of audio standing for the end of the reference."""
+
+    uses_reference_text = True
+
+    def synthesize(self, text, reference_wav, params):
+        return np.concatenate([np.full(24000, 0.5, dtype=np.float32), super().synthesize(text, reference_wav, params)])
+
+
+class TailTranscriber(FakeTranscriber):
+    """Hears the reference's last two words in the first second, then the requested text."""
+
+    def transcribe(self, wav, language=None, words=False):
+        data, sr = sf.read(str(wav))
+        seconds = len(data) / sr
+        spoken = ["Salut", "tout"]
+        timed = [Word(0.0, 0.4, "voilà"), Word(0.5, 0.9, "pas"), Word(1.1, 1.4, spoken[0]), Word(1.5, seconds, spoken[1])]
+        return type(super().transcribe(wav, language))("voilà pas Salut tout", language, timed if words else None)
+
+
+def test_worker_trims_the_end_of_the_reference_from_the_start(tmp_path):
+    engine = TailEngine()
+    _, client = make_client(tmp_path, engine, TailTranscriber("fake"))
+    with client:
+        client.app.state.worker.engine = engine
+        engine.load()
+        voice = add_voice(client, tmp_path, "Bon, c'est tout, voilà pas.")
+        plain = engine.synthesize("Salut tout", tmp_path / "x.wav", SynthesisParams())
+        job = client.post("/api/generate", json={"voice_id": voice["id"], "text": "Salut tout"}).json()
+        done = wait_for_job(client, job["id"])
+        assert done["status"] == "done", done
+        assert done["duration"] == pytest.approx(len(plain) / 24000 - 1.0, abs=0.05)  # the extra second is gone
 
 
 def test_prompt_seconds_is_clamped(tmp_path):
